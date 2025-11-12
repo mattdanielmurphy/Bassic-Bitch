@@ -13,11 +13,9 @@ public static class SoundStretch
 #if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
         cliPath = Path.Combine(Application.dataPath, "Plugins/soundstretch/mac/SoundStretch");
 #elif UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        // TODO: Add windows path
-        // cliPath = Path.Combine(toolDir, "windows/soundstretch.exe");
+        cliPath = Path.Combine(Application.dataPath, "Plugins/soundstretch/windows/soundstretch.exe");
 #elif UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
-        // TODO: Add linux path
-        // cliPath = Path.Combine(toolDir, "linux/soundstretch");
+        cliPath = Path.Combine(Application.dataPath, "Plugins/soundstretch/linux/soundstretch");
 #else
         UnityEngine.Debug.LogError("Unsupported platform for SoundStretch.");
         return null;
