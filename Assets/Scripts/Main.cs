@@ -184,7 +184,14 @@ public class Main : MonoBehaviour
     {
         if (videoOffsetLabel != null)
         {
-            videoOffsetLabel.text = $"Video Offset: {offsetMs:F0}ms";
+            videoOffsetLabel.text = $"{offsetMs:F0}ms";
+        }
+    }
+    void UpdateSongSpeedLabel(float offsetMs)
+    {
+        if (songSpeedLabel != null)
+        {
+            songSpeedLabel.text = $"{offsetMs:F0}%";
         }
     }
 }

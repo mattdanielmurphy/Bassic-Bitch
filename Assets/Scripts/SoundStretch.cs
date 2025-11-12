@@ -50,7 +50,7 @@ public static class SoundStretch
 
         Process process = new Process();
         process.StartInfo.FileName = cliPath;
-        process.StartInfo.Arguments = $"\"{inputPath.Replace("\"", "\\\"")}\" \"{outputPath.Replace("\"", "\\\"")}\" -tempo={tempo}";
+        process.StartInfo.Arguments = $"\"{inputPath.Replace("\"", "\\\"")}\" \"{outputPath.Replace("\"", "\\\"")}\" -tempo {tempo}";
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
