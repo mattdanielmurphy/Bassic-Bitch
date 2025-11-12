@@ -1,0 +1,14 @@
+{
+    "name": "Rocksmith2014PsarcLib",
+    "rootNamespace": "Rocksmith2014PsarcLib",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
