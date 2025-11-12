@@ -371,6 +371,7 @@ public class PsarcLoader : MonoBehaviour
                 // 3. Assign Notes and Start Playback (Ensures notes are ready right before audio starts)
                 if (noteHighway != null)
                 {
+                    noteHighway.psarcLoader = this; // Assign this PsarcLoader instance
                     noteHighway.notes = notes;
                     noteHighway.audioSource = audioSource;
                     audioSource.Play();
