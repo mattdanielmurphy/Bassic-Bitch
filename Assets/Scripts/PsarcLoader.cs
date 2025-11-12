@@ -13,16 +13,22 @@ public class PsarcLoader : MonoBehaviour
     public NoteHighway noteHighway; // Drag the NoteHighway GameObject here in the Inspector
     public bool startMuted = false; // Option to start the audio muted
     public AudioSource audioSource;
-    [Tooltip("Audio offset in milliseconds. Positive values delay the notes.")]
-    public float videoOffsetMs = 0f; // Public variable for audio synchronization offset
-    public float tempo = -30f; // Public variable for song speed, hardcoded to 70% (100 - 30)
+    public float songSpeedPercentage = 70f; // Public variable for song speed, default to 70%
+    public float currentSongSpeedPercentage = 70f; // Track the actual speed being played
 
     private string _lastDirectory = ""; // Stores the directory of the last opened PSARC file
     private string _originalAudioPath = ""; // Stores the path to the original, unstretched audio file
 
-    public void ChangeTempo(float newTempo)
+    public void SetSongSpeed(float percentage)
     {
-        UnityEngine.Debug.Log($"ChangeTempo called with newTempo: {newTempo}");
+        currentSongSpeedPercentage = percentage;
+        float tempoChange = percentage - 100f; // Calculate the tempo change for soundstretch
+        ChangeTempo(tempoChange);
+    }
+
+    public void ChangeTempo(float tempoChange)
+    {
+        UnityEngine.Debug.Log($"ChangeTempo called with tempoChange: {tempoChange}");
         if (string.IsNullOrEmpty(_originalAudioPath) || !File.Exists(_originalAudioPath))
         {
             UnityEngine.Debug.LogWarning("Original audio path not set or file not found. Cannot change tempo.");
@@ -40,10 +46,9 @@ public class PsarcLoader : MonoBehaviour
             UnityEngine.Debug.Log($"Audio was playing: {wasPlaying}, current time: {currentTime}");
         }
 
-        this.tempo = newTempo;
-        UnityEngine.Debug.Log($"PsarcLoader.tempo set to: {this.tempo}");
+        UnityEngine.Debug.Log($"PsarcLoader.currentSongSpeedPercentage: {currentSongSpeedPercentage}");
 
-        string stretchedAudioPath = SoundStretch.Process(_originalAudioPath, newTempo);
+        string stretchedAudioPath = SoundStretch.Process(_originalAudioPath, tempoChange);
         if (stretchedAudioPath != null)
         {
             UnityEngine.Debug.Log($"SoundStretch returned stretched audio path: {stretchedAudioPath}");
@@ -232,16 +237,9 @@ public class PsarcLoader : MonoBehaviour
                 }
 
                 // 3. Start the asynchronous loading of audio and notes
-                string stretchedAudioPath = SoundStretch.Process(fileToLoadPath, tempo);
-                if (stretchedAudioPath != null)
-                {
-                    StartCoroutine(LoadAudioAndNotes(stretchedAudioPath, arrangementTempPath));
-                }
-                else
-                {
-                    // Fallback to original audio if stretching fails
-                    StartCoroutine(LoadAudioAndNotes(fileToLoadPath, arrangementTempPath));
-                }
+                // Apply initial song speed
+                SetSongSpeed(songSpeedPercentage); // Apply the default song speed
+                StartCoroutine(LoadAudioAndNotes(_originalAudioPath, arrangementTempPath));
             }
         }
         catch (System.Exception e)

@@ -14,6 +14,7 @@ public class NoteHighway : MonoBehaviour
     public bool devNotePositioningMode = false; // If true, notes will not despawn and will stop at hitZ
     public float noteTravelTime = 50f;          // How long notes take to reach hit line
     public Main main;                           // Reference to the Main script for scrubbing state
+    public PsarcLoader psarcLoader;             // Reference to PsarcLoader for song speed
 
     [Header("Fret Label")]
     public GameObject fretLabelPrefab;       // Prefab for the fret number text label
@@ -135,7 +136,7 @@ public class NoteHighway : MonoBehaviour
     }
 
     void Update() {
-        if (audioSource == null || notes == null || notes.Count == 0)
+        if (audioSource == null || notes == null || notes.Count == 0 || psarcLoader == null)
         {
             // Wait for PsarcLoader to assign everything before running visual code
             return;
@@ -144,21 +145,24 @@ public class NoteHighway : MonoBehaviour
         if (audioSource == null) return;
         float t = audioSource.time;
         
+        // Calculate adjusted note travel time based on song speed
+        float adjustedNoteTravelTime = noteTravelTime / (psarcLoader.currentSongSpeedPercentage / 100f);
+
         // Determine the effective despawn Z and total travel time based on the dev mode
         float effectiveDespawnZ = devNotePositioningMode ? hitZ : despawnZOffset;
         float totalTravelTime;
 
         if (devNotePositioningMode)
         {
-            // If in dev mode, notes stop at hitZ, so total travel time is just noteTravelTime
-            totalTravelTime = noteTravelTime;
+            // If in dev mode, notes stop at hitZ, so total travel time is just adjustedNoteTravelTime
+            totalTravelTime = adjustedNoteTravelTime;
         }
         else
         {
             // Calculate the total time for a note to travel from spawnZ to effectiveDespawnZ (-2f)
-            float speed = (spawnZ - hitZ) / noteTravelTime;
+            float speed = (spawnZ - hitZ) / adjustedNoteTravelTime;
             float timeToDespawn = (hitZ - effectiveDespawnZ) / speed;
-            totalTravelTime = noteTravelTime + timeToDespawn;
+            totalTravelTime = adjustedNoteTravelTime + timeToDespawn;
         }
 
         foreach (var note in notes) {
