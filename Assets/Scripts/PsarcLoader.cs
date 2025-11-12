@@ -373,7 +373,6 @@ public class PsarcLoader : MonoBehaviour
                 {
                     noteHighway.notes = notes;
                     noteHighway.audioSource = audioSource;
-                    noteHighway.videoOffsetMs = videoOffsetMs; // Pass the offset
                     audioSource.Play();
                     // UnityEngine.Debug.Log("Playing audio: " + audioFilePath);
                 }

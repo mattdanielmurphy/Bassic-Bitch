@@ -189,18 +189,38 @@ public class Main : MonoBehaviour
         UpdateVideoOffsetLabel(value);
     }
 
+    void OnSongSpeedValueValueChanged(float value)
+    {
+        // not sure what to put here!
+        // if (noteHighway != null)
+        // {
+        //     noteHighway.currentSongSpeedPercentage = value;
+        // }
+        UpdateSongSpeedValueLabel(value);
+    }
+
     void UpdateVideoOffsetLabel(float offsetMs)
     {
         if (videoOffsetLabel != null)
         {
-            videoOffsetLabel.text = $"{offsetMs:F0}ms";
+            videoOffsetLabel.text = $"Video Offset: {offsetMs:F0}ms";
         }
     }
-    void UpdateSongSpeedLabel(float offsetMs)
+
+    void OnSongSpeedValueChanged(float value)
+    {
+        if (psarcLoader != null)
+        {
+            psarcLoader.SetSongSpeed(value);
+        }
+        UpdateSongSpeedLabel(value);
+    }
+
+    void UpdateSongSpeedLabel(float speed)
     {
         if (songSpeedLabel != null)
         {
-            songSpeedLabel.text = $"{offsetMs:F0}%";
+            songSpeedLabel.text = $"Speed: {speed:F0}%";
         }
     }
 }
