@@ -1358,7 +1358,6 @@ MonoBehaviour:
   playPauseButton: {fileID: 773920194}
   playbackScrubber: {fileID: 1002986902}
   muteButton: {fileID: 1430956398}
-  isDraggingScrubber: 0
 --- !u!4 &1569913405
 Transform:
   m_ObjectHideFlags: 0
@@ -1521,12 +1520,11 @@ MonoBehaviour:
   despawnZOffset: -30
   devNotePositioningMode: 0
   noteTravelTime: 4
-  main: {fileID: 0}
   fretLabelPrefab: {fileID: 1178580901511584906, guid: be076da654f1447f1acfde10495b66f2, type: 3}
   fretLabelYOffset: -7
   fretLabelXOffset: 28
-  fretLabelRotationX: 20
-  fretLabelFontSize: 18
+  fretLabelRotationX: 30
+  fretLabelFontSize: 13
   noteScaleX: 3
   noteScaleY: 1
   noteScaleZ: 0.8
