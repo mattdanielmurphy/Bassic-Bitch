@@ -189,16 +189,6 @@ public class Main : MonoBehaviour
         UpdateVideoOffsetLabel(value);
     }
 
-    void OnSongSpeedValueValueChanged(float value)
-    {
-        // not sure what to put here!
-        // if (noteHighway != null)
-        // {
-        //     noteHighway.currentSongSpeedPercentage = value;
-        // }
-        UpdateSongSpeedValueLabel(value);
-    }
-
     void UpdateVideoOffsetLabel(float offsetMs)
     {
         if (videoOffsetLabel != null)
