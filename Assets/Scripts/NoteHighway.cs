@@ -226,12 +226,12 @@ public class NoteHighway : MonoBehaviour
                         spawnZ
                     );
 
-                    // Calculate rotation for the label
-                    Quaternion labelRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
-
                     // Instantiate the label and parent it to the note object so it moves with it
-                    var labelGO = Instantiate(fretLabelPrefab, labelPos, labelRotation, go.transform);
+                    var labelGO = Instantiate(fretLabelPrefab, labelPos, Quaternion.identity, go.transform);
                     labelGO.name = $"FretLabel_{note.fretNumber}";
+                    
+                    // Apply the desired rotation to the local transform to prevent distortion
+                    labelGO.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
 
                     // Find the TextMeshPro component on the label prefab
                     var labelText = labelGO.GetComponent<TextMeshPro>();

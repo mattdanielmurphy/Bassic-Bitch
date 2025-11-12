@@ -30,11 +30,17 @@ public class Main : MonoBehaviour
 
         var eventTrigger = playbackScrubber.gameObject.AddComponent<UnityEngine.EventSystems.EventTrigger>();
         var pointerDown = new UnityEngine.EventSystems.EventTrigger.Entry { eventID = UnityEngine.EventSystems.EventTriggerType.PointerDown };
-        pointerDown.callback.AddListener((data) => { isDraggingScrubber = true; });
+        pointerDown.callback.AddListener((data) => { 
+            isDraggingScrubber = true; 
+            if (noteHighway != null) noteHighway.ResetNotes(); 
+        });
         eventTrigger.triggers.Add(pointerDown);
 
         var pointerUp = new UnityEngine.EventSystems.EventTrigger.Entry { eventID = UnityEngine.EventSystems.EventTriggerType.PointerUp };
-        pointerUp.callback.AddListener((data) => { isDraggingScrubber = false; });
+        pointerUp.callback.AddListener((data) => { 
+            isDraggingScrubber = false; 
+            if (noteHighway != null) noteHighway.ResetNotes(); 
+        });
         eventTrigger.triggers.Add(pointerUp);
     }
 
@@ -96,11 +102,6 @@ public class Main : MonoBehaviour
         if (psarcLoader?.audioSource?.clip == null) return;
 
         psarcLoader.audioSource.time = value * psarcLoader.audioSource.clip.length;
-
-        if (noteHighway != null)
-        {
-            noteHighway.ResetNotes();
-        }
     }
 
     void UpdatePlayPauseButtonText()
