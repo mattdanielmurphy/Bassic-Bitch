@@ -10,6 +10,7 @@ public class NoteData
 
     // Fields for NoteHighway to track the note's state
     public GameObject noteObject;
+    public GameObject fretLabelObject; // New field to track the separate fret label object
     public bool isSpawned = false;
     public bool hitMarkerSpawned = false; // Track if the hit marker has been spawned
     public float previousZPos = -1f;      // Track the last Z position to detect line crossing

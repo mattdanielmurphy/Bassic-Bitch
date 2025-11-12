@@ -201,7 +201,7 @@ namespace Framework
 
 					if (_clearButtonContent == null)
 					{
-						_clearButtonContent = EditorGUIUtility.IconContent("d_winbtn_win_close");
+						_clearButtonContent = EditorGUIUtility.IconContent("winbtn_win_close");
 					}
 
 					if (_clearAllButtonContent == null)

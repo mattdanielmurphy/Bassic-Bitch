@@ -6,13 +6,18 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using Rocksmith2014PsarcLib.Psarc;
 using UnityEngine.Networking;
+using SFB; // Assuming the StandaloneFileBrowser is in the SFB namespace
 
 public class PsarcLoader : MonoBehaviour
 {
-    public string psarcFilePath = "/Users/matthewmurphy/Library/CloudStorage/CloudMounter-MattMurphy/My Documents/Bass/4 String/Tier 1 - Foundational (Easiest)/The Beatles - When I'm Sixty Four (B)_p - Tier 1.psarc";
     public NoteHighway noteHighway; // Drag the NoteHighway GameObject here in the Inspector
     public bool startMuted = false; // Option to start the audio muted
     public AudioSource audioSource;
+    [Tooltip("Audio offset in milliseconds. Positive values delay the notes.")]
+    public float videoOffsetMs = 0f; // Public variable for audio synchronization offset
+    public float tempo = 0f; // Public variable for song speed
+
+    private string _lastDirectory = ""; // Stores the directory of the last opened PSARC file
 
     public void TogglePlayback()
     {
@@ -34,11 +39,53 @@ public class PsarcLoader : MonoBehaviour
     {
         audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.mute = startMuted;
+        OpenPsarcFileBrowser();
+    }
 
+    public void NewSong()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+        {
+            audioSource.Stop();
+        }
+        OpenPsarcFileBrowser();
+    }
+
+    public void OpenPsarcFileBrowser()
+    {
+        var extensions = new [] {
+            new ExtensionFilter("Rocksmith PSARC Files", "psarc" ),
+            new ExtensionFilter("All Files", "*" ),
+        };
+        
+        // Use OpenFilePanelAsync for non-blocking UI
+        StandaloneFileBrowser.OpenFilePanelAsync("Open Rocksmith PSARC File", _lastDirectory, extensions, false, (string[] paths) => {
+            if (paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
+            {
+                LoadPsarc(paths[0]);
+            }
+            else
+            {
+                UnityEngine.Debug.Log("File selection cancelled or failed.");
+            }
+        });
+    }
+
+    private void LoadPsarc(string psarcFilePath)
+    {
         if (!File.Exists(psarcFilePath))
         {
             UnityEngine.Debug.LogError("PSARC file does not exist: " + psarcFilePath);
             return;
+        }
+
+        // Save the directory of the loaded file for the next file browser open
+        _lastDirectory = Path.GetDirectoryName(psarcFilePath);
+
+        // Reset the NoteHighway immediately to clear old notes and stop processing
+        if (noteHighway != null)
+        {
+            noteHighway.ResetNotes();
         }
 
         try
@@ -47,44 +94,31 @@ public class PsarcLoader : MonoBehaviour
             {
                 UnityEngine.Debug.Log("Opened PSARC file: " + psarcFilePath);
 
-                // UnityEngine.Debug.Log("Files in PSARC:");
-                // foreach (var entry in psarc.TOC.Entries)
-                // {
-                //     UnityEngine.Debug.Log($"- {entry.Path}");
-                // }
-
-                // The actual audio file name is likely different from "song.ogg".
-                // We will look for a file ending in .ogg or .wem.
+                // 1. Find and extract audio
                 var audioEntry = psarc.TOC.Entries.FirstOrDefault(e => e.Path != null && (e.Path.EndsWith(".ogg") || e.Path.EndsWith(".wem")));
+                string fileToLoadPath = null;
 
                 if (audioEntry != null)
                 {
                     string audioName = Path.GetFileName(audioEntry.Path);
                     string tempPath = Path.Combine(Application.temporaryCachePath, audioName);
                     
-                    // UnityEngine.Debug.Log($"Attempting to extract audio file: {audioEntry.Path}");
-
                     using (var outFile = new FileStream(tempPath, FileMode.Create))
                     {
                         psarc.InflateEntry(audioEntry, outFile);
                     }
-                    // UnityEngine.Debug.Log($"Extracted audio: {audioName} to {tempPath}");
 
-                    string fileToLoadPath = tempPath;
                     string extension = Path.GetExtension(tempPath).ToLower();
 
                     if (extension == ".wem")
                     {
-                        // If it's a WEM, check for a converted WAV file in the same location
                         string wavPath = Path.ChangeExtension(tempPath, ".wav");
                         if (File.Exists(wavPath))
                         {
-                            // UnityEngine.Debug.Log($"Found converted WAV file: {wavPath}. Loading it instead of WEM.");
                             fileToLoadPath = wavPath;
                         }
                         else
                         {
-                            // Convert the WEM to WAV
                             if (ConvertWemToWav(tempPath, wavPath))
                             {
                                 fileToLoadPath = wavPath;
@@ -96,42 +130,44 @@ public class PsarcLoader : MonoBehaviour
                             }
                         }
                     }
-
-                    // Play the audio file
-                    StartCoroutine(LoadAndPlayAudio(fileToLoadPath));
+                    else
+                    {
+                        fileToLoadPath = tempPath;
+                    }
                 }
                 else
                 {
                     UnityEngine.Debug.LogError("No audio file (.ogg or .wem) found in PSARC.");
+                    return;
                 }
 
-                // Find Arrangement Entry (contains the chart)
+                // 2. Find and extract arrangement XML
                 var arrangementEntry = psarc.TOC.Entries.FirstOrDefault(e => e.Path != null && e.Path.EndsWith("_bass.xml"));
+                string arrangementTempPath = null;
+
                 if (arrangementEntry != null) {
-                    string arrangementTempPath = Path.Combine(
+                    arrangementTempPath = Path.Combine(
                         Application.temporaryCachePath, Path.GetFileName(arrangementEntry.Path));
                     using (var outFile = new FileStream(arrangementTempPath, FileMode.Create)) {
                         psarc.InflateEntry(arrangementEntry, outFile);
                     }
-                    // UnityEngine.Debug.Log($"Extracted arrangement XML: {arrangementEntry.Path} to {arrangementTempPath}");
-
-                    List<NoteData> notes = ArrangementParser.ParseArrangement(arrangementTempPath);
-                    
-                    // Pass notes to the NoteHighway component
-                    if (noteHighway != null)
-                    {
-                        noteHighway.notes = notes;
-                        noteHighway.audioSource = audioSource;
-                    }
-                    else
-                    {
-                        UnityEngine.Debug.LogError("NoteHighway not set in Inspector!");
-                    }
                 }
                 else {
                     UnityEngine.Debug.LogError("Bass arrangement XML not found in PSARC!");
+                    return;
                 }
 
+                // 3. Start the asynchronous loading of audio and notes
+                string stretchedAudioPath = SoundStretch.Process(fileToLoadPath, tempo);
+                if (stretchedAudioPath != null)
+                {
+                    StartCoroutine(LoadAudioAndNotes(stretchedAudioPath, arrangementTempPath));
+                }
+                else
+                {
+                    // Fallback to original audio if stretching fails
+                    StartCoroutine(LoadAudioAndNotes(fileToLoadPath, arrangementTempPath));
+                }
             }
         }
         catch (System.Exception e)
@@ -225,12 +261,11 @@ public class PsarcLoader : MonoBehaviour
         }
     }
 
-    IEnumerator LoadAndPlayAudio(string filePath)
+    IEnumerator LoadAudioAndNotes(string audioFilePath, string arrangementFilePath)
     {
-        // Use the Uri class to correctly format the file path into a URI string.
-        // This is the most reliable way to handle local file paths for UnityWebRequest.
-        string uri = new System.Uri(filePath).AbsoluteUri;
-        string extension = Path.GetExtension(filePath).ToLower();
+        // 1. Load Audio
+        string uri = new System.Uri(audioFilePath).AbsoluteUri;
+        string extension = Path.GetExtension(audioFilePath).ToLower();
         AudioType audioType = AudioType.UNKNOWN;
 
         if (extension == ".wav")
@@ -238,22 +273,11 @@ public class PsarcLoader : MonoBehaviour
             audioType = AudioType.WAV;
         }
 
-        // --- Debugging Checks ---
-        if (!File.Exists(filePath))
+        if (!File.Exists(audioFilePath))
         {
-            UnityEngine.Debug.LogError($"Audio file not found at path: {filePath}");
+            UnityEngine.Debug.LogError($"Audio file not found at path: {audioFilePath}");
             yield break;
         }
-
-        FileInfo fileInfo = new FileInfo(filePath);
-        if (fileInfo.Length == 0)
-        {
-            UnityEngine.Debug.LogError($"Audio file is empty (0 bytes) at path: {filePath}");
-            yield break;
-        }
-        
-        // UnityEngine.Debug.Log($"Attempting to load audio from URI: {uri} (File size: {fileInfo.Length} bytes)");
-        // --- End Debugging Checks ---
 
         using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(uri, audioType))
         {
@@ -264,12 +288,27 @@ public class PsarcLoader : MonoBehaviour
                 AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
                 if (clip == null)
                 {
-                    UnityEngine.Debug.LogError("DownloadHandlerAudioClip.GetContent returned null. This is often the cause of the FMOD error.");
+                    UnityEngine.Debug.LogError("DownloadHandlerAudioClip.GetContent returned null. Cannot load audio.");
                     yield break;
                 }
                 audioSource.clip = clip;
-                audioSource.Play();
-                // UnityEngine.Debug.Log("Playing audio: " + filePath);
+                
+                // 2. Parse Notes (Synchronous)
+                List<NoteData> notes = ArrangementParser.ParseArrangement(arrangementFilePath);
+                
+                // 3. Assign Notes and Start Playback (Ensures notes are ready right before audio starts)
+                if (noteHighway != null)
+                {
+                    noteHighway.notes = notes;
+                    noteHighway.audioSource = audioSource;
+                    noteHighway.videoOffsetMs = videoOffsetMs; // Pass the offset
+                    audioSource.Play();
+                    // UnityEngine.Debug.Log("Playing audio: " + audioFilePath);
+                }
+                else
+                {
+                    UnityEngine.Debug.LogError("NoteHighway not set in Inspector! Cannot start song.");
+                }
             }
             else
             {

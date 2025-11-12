@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -11,9 +10,14 @@ public class Main : MonoBehaviour
     public Button playPauseButton;
     public Slider playbackScrubber;
     public Button muteButton;
+    public Button newSongButton; // New slot for the "New Song" button
+    public Slider videoOffsetSlider; // Slider for video offset
+    public TextMeshProUGUI videoOffsetLabel; // Label to display the current video offset value
+    public Slider songSpeedSlider; // Slider for song speed
+    public TextMeshProUGUI songSpeedLabel; // Label to display the current song speed value
 
     private bool isPlaying = false;
-    public bool isDraggingScrubber = false;
+    private float _initialVideoOffsetMs = 0f; // Store the default value from NoteHighway.cs on startup
     private bool isUpdatingScrubberFromCode = false; // Flag to prevent feedback loop
 
     void Start()
@@ -21,27 +25,36 @@ public class Main : MonoBehaviour
         playPauseButton.onClick.AddListener(TogglePlayPause);
         muteButton.onClick.AddListener(ToggleMute);
         playbackScrubber.onValueChanged.AddListener(OnScrubberValueChanged);
+        newSongButton.onClick.AddListener(NewSong); // Attach the new method
+        
+        // Video Offset Slider setup
+        if (videoOffsetSlider != null && noteHighway != null)
+        {
+            videoOffsetSlider.minValue = -200f;
+            videoOffsetSlider.maxValue = 200f;
+            videoOffsetSlider.onValueChanged.AddListener(OnVideoOffsetValueChanged);
+            
+            // Store the default value from NoteHighway and set initial slider value and label
+            _initialVideoOffsetMs = noteHighway.videoOffsetMs;
+            videoOffsetSlider.value = _initialVideoOffsetMs;
+            UpdateVideoOffsetLabel(_initialVideoOffsetMs);
+        }
+
+        // Song Speed Slider setup
+        if (songSpeedSlider != null)
+        {
+            songSpeedSlider.minValue = -50f;
+            songSpeedSlider.maxValue = 50f;
+            songSpeedSlider.value = 0f;
+            songSpeedSlider.onValueChanged.AddListener(OnSongSpeedValueChanged);
+            UpdateSongSpeedLabel(0f);
+        }
 
         // Set initial mute button text based on PsarcLoader's setting
         if (psarcLoader != null)
         {
             UpdateMuteButtonText();
         }
-
-        var eventTrigger = playbackScrubber.gameObject.AddComponent<UnityEngine.EventSystems.EventTrigger>();
-        var pointerDown = new UnityEngine.EventSystems.EventTrigger.Entry { eventID = UnityEngine.EventSystems.EventTriggerType.PointerDown };
-        pointerDown.callback.AddListener((data) => { 
-            isDraggingScrubber = true; 
-            if (noteHighway != null) noteHighway.ResetNotes(); 
-        });
-        eventTrigger.triggers.Add(pointerDown);
-
-        var pointerUp = new UnityEngine.EventSystems.EventTrigger.Entry { eventID = UnityEngine.EventSystems.EventTriggerType.PointerUp };
-        pointerUp.callback.AddListener((data) => { 
-            isDraggingScrubber = false; 
-            if (noteHighway != null) noteHighway.ResetNotes(); 
-        });
-        eventTrigger.triggers.Add(pointerUp);
     }
 
     void Update()
@@ -60,12 +73,39 @@ public class Main : MonoBehaviour
             ToggleMute();
         }
 
-        if (psarcLoader?.audioSource?.clip != null && psarcLoader.audioSource.isPlaying && !isDraggingScrubber)
+        if (psarcLoader?.audioSource?.clip != null && psarcLoader.audioSource.isPlaying)
         {
             // Set flag to prevent OnScrubberValueChanged from firing the reset logic
             isUpdatingScrubberFromCode = true;
             playbackScrubber.value = psarcLoader.audioSource.time / psarcLoader.audioSource.clip.length;
             isUpdatingScrubberFromCode = false;
+        }
+    }
+
+    public void NewSong()
+    {
+        if (psarcLoader != null)
+        {
+            psarcLoader.NewSong();
+            
+            // 1. Apply default video offset
+            if (videoOffsetSlider != null && noteHighway != null)
+            {
+                videoOffsetSlider.value = _initialVideoOffsetMs;
+                noteHighway.videoOffsetMs = _initialVideoOffsetMs;
+                UpdateVideoOffsetLabel(_initialVideoOffsetMs); // Update label on song load
+            }
+
+            // 2. Reset song speed
+            if (songSpeedSlider != null)
+            {
+                songSpeedSlider.value = 0f;
+                OnSongSpeedValueChanged(0f);
+            }
+
+            // 3. Update play/pause button text based on actual playback state (fixes autoplay bug)
+            isPlaying = psarcLoader.audioSource != null && psarcLoader.audioSource.isPlaying;
+            UpdatePlayPauseButtonText();
         }
     }
 
@@ -136,6 +176,40 @@ public class Main : MonoBehaviour
             {
                 textLabel.text = isMuted ? "Unmute" : "Mute";
             }
+        }
+    }
+
+    void OnVideoOffsetValueChanged(float value)
+    {
+        if (noteHighway != null)
+        {
+            noteHighway.videoOffsetMs = value;
+        }
+        UpdateVideoOffsetLabel(value);
+    }
+
+    void UpdateVideoOffsetLabel(float offsetMs)
+    {
+        if (videoOffsetLabel != null)
+        {
+            videoOffsetLabel.text = $"Video Offset: {offsetMs:F0}ms";
+        }
+    }
+
+    void OnSongSpeedValueChanged(float value)
+    {
+        if (psarcLoader != null)
+        {
+            psarcLoader.tempo = value;
+        }
+        UpdateSongSpeedLabel(value);
+    }
+
+    void UpdateSongSpeedLabel(float speed)
+    {
+        if (songSpeedLabel != null)
+        {
+            songSpeedLabel.text = $"Speed: {speed:F0}%";
         }
     }
 }

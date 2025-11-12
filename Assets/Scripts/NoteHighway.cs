@@ -7,6 +7,7 @@ public class NoteHighway : MonoBehaviour
     public GameObject notePrefab;               // Drag your prefab here in Editor
     public AudioSource audioSource;             // Assign the AudioSource here or in Start()
     public List<NoteData> notes;                // Fill this with ArrangementParser
+    public float videoOffsetMs = 0f;            // Video offset in milliseconds (from PsarcLoader)
     public float spawnZ = 100f;                 // Starting Z position for notes (far end of highway)
     public float hitZ = 0f;                     // Where notes meet the play line (near end)
     public float despawnZOffset = -30f;         // Where notes meet the play line (near end)
@@ -20,6 +21,7 @@ public class NoteHighway : MonoBehaviour
     public float fretLabelXOffset = 0.0f;    // Horizontal offset for the fret number text label
     public float fretLabelRotationX = 0.0f;  // X-axis rotation for the fret number text label (e.g., 90 for flat)
     public float fretLabelFontSize = 10.0f;  // Font size for the fret number text label
+    public float fretLabelYScale = 1.0f;     // Vertical scale for the fret number text label
 
     [Header("Note Visuals")]
     public float noteScaleX = 1f;
@@ -139,12 +141,6 @@ public class NoteHighway : MonoBehaviour
             return;
         }
 
-        if (main != null && main.isDraggingScrubber)
-        {
-            // Do not process note movement or spawn hit markers while scrubbing
-            return;
-        }
-
         if (audioSource == null) return;
         float t = audioSource.time;
         
@@ -166,10 +162,33 @@ public class NoteHighway : MonoBehaviour
         }
 
         foreach (var note in notes) {
-            float startTime = note.time - noteTravelTime;
+            // Apply the video offset (converted to seconds) to the note's time
+            // The offset is inverted to match the user's desired behavior.
+            float offsetSeconds = -videoOffsetMs / 1000f;
+            float startTime = note.time - noteTravelTime - offsetSeconds;
 
-            // 1. Spawning Logic: Spawn the note when it's time to start moving
-            if (!note.isSpawned && t >= startTime)
+            // REWIND/RESET LOGIC: If music time goes before the note's start time, reset the note's state.
+            // The 'note.isSpawned' check was removed to ensure notes that were previously hit (and thus
+            // not spawned) are also reset, allowing them to be re-spawned and hit again after a rewind.
+            if (t < startTime)
+            {
+                if (note.noteObject != null)
+                {
+                    Destroy(note.noteObject);
+                    note.noteObject = null;
+                }
+                if (note.fretLabelObject != null)
+                {
+                    Destroy(note.fretLabelObject);
+                    note.fretLabelObject = null;
+                }
+                note.isSpawned = false;
+                note.hitMarkerSpawned = false;
+                note.previousZPos = -1f; // Reset previous position
+            }
+
+            // 1. Spawning Logic: Spawn the note when it's time to start moving and it's not already spawned
+            if (!note.isSpawned && t >= startTime && t < startTime + totalTravelTime)
             {
                 float noteX;
                 float scaleX;
@@ -216,32 +235,38 @@ public class NoteHighway : MonoBehaviour
                 // Show Fret Numbers (Option 1: Text Label)
                 if (fretLabelPrefab != null)
                 {
-                    // Calculate the Y position for the label (below the lowest string)
-                    // totalStrings - 1 is the index of the lowest string (e.g., G string for 4-string bass)
-                    float labelY = GetStringY(totalStrings - 1) + fretLabelYOffset;
+                    // Calculate the fixed Y position for the label (below the lowest string)
+                    // totalStrings - 1 is the index of the lowest string
+                    float fixedLabelY = GetStringY(totalStrings - 1) + fretLabelYOffset;
                     
                     Vector3 labelPos = new Vector3(
                         spawnPos.x + fretLabelXOffset, // Apply the new X offset
-                        labelY,
+                        fixedLabelY,                   // Use the fixed Y position
                         spawnZ
                     );
 
-                    // Instantiate the label and parent it to the note object so it moves with it
-                    var labelGO = Instantiate(fretLabelPrefab, labelPos, Quaternion.identity, go.transform);
-                    labelGO.name = $"FretLabel_{note.fretNumber}";
+                    // Instantiate the label and parent it to the NoteHighway transform (this.transform)
+                    // so it moves along Z with the note but stays at a constant Y.
+                    var labelGO = Instantiate(fretLabelPrefab, labelPos, Quaternion.identity, transform);
+                    labelGO.name = $"FretLabel_{note.fretNumber}_{note.stringNumber}";
                     
-                    // Apply the desired rotation to the local transform to prevent distortion
-                    labelGO.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
+                    // Store the label object in the NoteData so it can be destroyed later
+                    note.fretLabelObject = labelGO;
 
                     // Find the TextMeshPro component on the label prefab
                     var labelText = labelGO.GetComponent<TextMeshPro>();
                     if (labelText != null)
                     {
+                        // Apply the desired rotation to the TextMeshPro component's transform
+                        labelText.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
+                        
                         labelText.text = note.fretNumber.ToString();
                         labelText.fontSize = fretLabelFontSize; // Apply font size
                     }
                     else
                     {
+                        // Apply the rotation to the root object if no TextMeshPro component is found
+                        labelGO.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
                         Debug.LogWarning("Fret Label Prefab does not contain a TextMeshPro component.");
                     }
                 }
@@ -260,6 +285,14 @@ public class NoteHighway : MonoBehaviour
                 // To fix Y-level drift, recalculate the correct Y position every frame.
                 float correctY = GetStringY(note.stringNumber);
                 note.noteObject.transform.position = new Vector3(note.noteObject.transform.position.x, correctY, zPos);
+
+                // Move the associated fret label along the Z-axis
+                if (note.fretLabelObject != null)
+                {
+                    // Keep the label's X and Y fixed, only update Z
+                    Vector3 labelPos = note.fretLabelObject.transform.position;
+                    note.fretLabelObject.transform.position = new Vector3(labelPos.x, labelPos.y, zPos);
+                }
 
                 // Hit Marker Spawning Logic based on crossing the hit line
                 if (note.previousZPos > hitZ && zPos <= hitZ && !note.hitMarkerSpawned)
@@ -285,29 +318,33 @@ public class NoteHighway : MonoBehaviour
 
                     hitMarker.AddComponent<HitMarkerFader>().fadeTime = hitMarkerFadeTime;
 
-                    // Remove the fret label from the hit marker
-                    if (fretLabelPrefab != null)
-                    {
-                        Transform labelTransform = hitMarker.transform.Find($"FretLabel_{note.fretNumber}");
-                        if (labelTransform != null)
-                        {
-                            Destroy(labelTransform.gameObject);
-                        }
-                    }
-
-                    // Mark as spawned so we don't do this again
-                    note.hitMarkerSpawned = true;
-
                     // The original note has served its purpose. Hide it and destroy it.
                     note.noteObject.SetActive(false);
                     Destroy(note.noteObject);
                     note.noteObject = null; // Important to prevent further processing
+                    note.isSpawned = false; // Reset state for rewind
+                    note.hitMarkerSpawned = true; // Mark as hit for this pass
+
+                    // Destroy the fret label object as well
+                    if (note.fretLabelObject != null)
+                    {
+                        Destroy(note.fretLabelObject);
+                        note.fretLabelObject = null;
+                    }
                 }
                 // If the note has passed the despawn point (and wasn't destroyed by the hit marker logic)
                 else if (!devNotePositioningMode && timeSinceSpawn >= totalTravelTime)
                 {
                     Destroy(note.noteObject);
                     note.noteObject = null;
+                    note.isSpawned = false; // Reset state for rewind
+
+                    // Destroy the fret label object as well
+                    if (note.fretLabelObject != null)
+                    {
+                        Destroy(note.fretLabelObject);
+                        note.fretLabelObject = null;
+                    }
                 }
 
                 // Update the previous position for the next frame's check
@@ -327,10 +364,18 @@ public class NoteHighway : MonoBehaviour
                 Destroy(note.noteObject);
                 note.noteObject = null;
             }
+            if (note.fretLabelObject != null)
+            {
+                Destroy(note.fretLabelObject);
+                note.fretLabelObject = null;
+            }
             note.isSpawned = false;
             note.hitMarkerSpawned = false;
             note.previousZPos = -1f; // Reset previous position
         }
+
+        // Crucial: Set notes to null so the Update loop stops processing immediately
+        notes = null;
     }
 
     private void CreateFretboardStrings()

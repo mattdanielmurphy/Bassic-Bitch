@@ -1,0 +1,81 @@
+
+using UnityEngine;
+using System.Diagnostics;
+using System.IO;
+
+public static class SoundStretch
+{
+    public static string Process(string inputPath, float tempo)
+    {
+        string toolDir = Path.Combine(Application.streamingAssetsPath, "tools");
+        string cliPath = "";
+
+#if UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+        cliPath = Path.Combine(Application.dataPath, "Plugins/soundstretch/mac/SoundStretch");
+#elif UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        // TODO: Add windows path
+        // cliPath = Path.Combine(toolDir, "windows/soundstretch.exe");
+#elif UNITY_STANDALONE_LINUX || UNITY_EDITOR_LINUX
+        // TODO: Add linux path
+        // cliPath = Path.Combine(toolDir, "linux/soundstretch");
+#else
+        UnityEngine.Debug.LogError("Unsupported platform for SoundStretch.");
+        return null;
+#endif
+
+        if (!File.Exists(cliPath))
+        {
+            UnityEngine.Debug.LogError($"SoundStretch not found at: {cliPath}.");
+            return null;
+        }
+
+        // On macOS/Linux, ensure the executable has execute permissions
+        if (Application.platform != RuntimePlatform.WindowsPlayer && Application.platform != RuntimePlatform.WindowsEditor)
+        {
+            Process chmodProcess = new Process();
+            chmodProcess.StartInfo.FileName = "/bin/bash";
+            chmodProcess.StartInfo.Arguments = $"-c \"chmod +x \\"{cliPath}\\"\"";
+            chmodProcess.StartInfo.UseShellExecute = false;
+            chmodProcess.StartInfo.RedirectStandardOutput = true;
+            chmodProcess.StartInfo.RedirectStandardError = true;
+            chmodProcess.Start();
+            chmodProcess.WaitForExit();
+
+            if (chmodProcess.ExitCode != 0)
+            {
+                UnityEngine.Debug.LogError($"Failed to set execute permissions on SoundStretch. STDERR: {chmodProcess.StandardError.ReadToEnd()}");
+                return null;
+            }
+        }
+
+        string outputPath = Path.Combine(Path.GetDirectoryName(inputPath), Path.GetFileNameWithoutExtension(inputPath) + "_stretched.wav");
+
+        Process process = new Process();
+        process.StartInfo.FileName = cliPath;
+        process.StartInfo.Arguments = $"\"{inputPath}\" \"{outputPath}\" -tempo={tempo}";
+        process.StartInfo.UseShellExecute = false;
+        process.StartInfo.RedirectStandardOutput = true;
+        process.StartInfo.RedirectStandardError = true;
+
+        try
+        {
+            process.Start();
+            process.WaitForExit();
+
+            if (process.ExitCode == 0)
+            {
+                return outputPath;
+            }
+            else
+            {
+                UnityEngine.Debug.LogError($"SoundStretch failed with exit code {process.ExitCode}.\nSTDERR: {process.StandardError.ReadToEnd()}");
+                return null;
+            }
+        }
+        catch (System.Exception e)
+        {
+            UnityEngine.Debug.LogError($"Error starting SoundStretch process: {e.Message}");
+            return null;
+        }
+    }
+}

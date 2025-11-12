@@ -13,6 +13,8 @@ public static class ArrangementParser
     public static List<NoteData> ParseArrangement(string arrangementXmlPath)
     {
         List<NoteData> notes = new List<NoteData>();
+        // Use a HashSet to track unique notes based on time, string, and fret to filter out duplicates
+        HashSet<string> uniqueNoteKeys = new HashSet<string>();
 
         if (!System.IO.File.Exists(arrangementXmlPath))
         {
@@ -44,12 +46,23 @@ public static class ArrangementParser
                     fretAttr != null && int.TryParse(fretAttr.Value, out fret) &&
                     stringAttr != null && int.TryParse(stringAttr.Value, out stringIndex))
                 {
-                    notes.Add(new NoteData
+                    // Create a unique key for the note: time|string|fret
+                    string noteKey = $"{time}|{stringIndex}|{fret}";
+
+                    if (uniqueNoteKeys.Add(noteKey))
                     {
-                        time = time,
-                        fretNumber = fret,
-                        stringNumber = stringIndex
-                    });
+                        notes.Add(new NoteData
+                        {
+                            time = time,
+                            fretNumber = fret,
+                            stringNumber = stringIndex
+                        });
+                    }
+                    else
+                    {
+                        // Log a warning if a duplicate note is found and skipped
+                        Debug.LogWarning($"Skipping duplicate note: {noteKey}");
+                    }
                 }
                 else
                 {
@@ -58,7 +71,7 @@ public static class ArrangementParser
                 }
             }
 
-            Debug.Log($"Successfully parsed {notes.Count} notes from arrangement XML.");
+            Debug.Log($"Successfully parsed {notes.Count} unique notes from arrangement XML.");
         }
         catch (System.Exception e)
         {
