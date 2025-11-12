@@ -86,6 +86,12 @@ public class NoteHighway : MonoBehaviour
 
     [Header("Materials")]
     public Material[] stringMaterials;
+    public Material palmMuteMaterial;
+    public Material muteMaterial;
+    public Material accentMaterial;
+    public Material slideMaterial;
+    public Material hammerOnMaterial;
+    public Material pullOffMaterial;
 
     private void CreateFretboardLinesZ()
     {
@@ -136,17 +142,27 @@ public class NoteHighway : MonoBehaviour
     }
 
     void Update() {
-        if (audioSource == null || notes == null || notes.Count == 0 || psarcLoader == null)
+        if (audioSource == null)
         {
-            // Wait for PsarcLoader to assign everything before running visual code
+            UnityEngine.Debug.LogWarning("NoteHighway Update: audioSource is null. Waiting for PsarcLoader to assign.");
+            return;
+        }
+        if (notes == null || notes.Count == 0)
+        {
+            UnityEngine.Debug.LogWarning("NoteHighway Update: notes list is null or empty. Waiting for PsarcLoader to assign.");
+            return;
+        }
+        if (psarcLoader == null)
+        {
+            UnityEngine.Debug.LogWarning("NoteHighway Update: psarcLoader is null. Waiting for PsarcLoader to assign.");
             return;
         }
 
-        if (audioSource == null) return;
         float t = audioSource.time;
         
         // Calculate adjusted note travel time based on song speed
-        float adjustedNoteTravelTime = noteTravelTime / (psarcLoader.currentSongSpeedPercentage / 100f);
+        float currentSongSpeedPercentage = psarcLoader.currentSongSpeedPercentage;
+        float adjustedNoteTravelTime = noteTravelTime / (currentSongSpeedPercentage / 100f);
 
         // Determine the effective despawn Z and total travel time based on the dev mode
         float effectiveDespawnZ = devNotePositioningMode ? hitZ : despawnZOffset;
@@ -169,8 +185,10 @@ public class NoteHighway : MonoBehaviour
             // Apply the video offset (converted to seconds) to the note's time
             // The offset is inverted to match the user's desired behavior.
             float offsetSeconds = -videoOffsetMs / 1000f;
-            float startTime = note.time - noteTravelTime - offsetSeconds;
-
+            // Adjust note.time based on the current song speed percentage
+            float adjustedNoteTime = note.time / (psarcLoader.currentSongSpeedPercentage / 100f);
+            float startTime = adjustedNoteTime - adjustedNoteTravelTime - offsetSeconds;
+            
             // REWIND/RESET LOGIC: If music time goes before the note's start time, reset the note's state.
             // The 'note.isSpawned' check was removed to ensure notes that were previously hit (and thus
             // not spawned) are also reset, allowing them to be re-spawned and hit again after a rewind.
@@ -189,11 +207,13 @@ public class NoteHighway : MonoBehaviour
                 note.isSpawned = false;
                 note.hitMarkerSpawned = false;
                 note.previousZPos = -1f; // Reset previous position
+                // UnityEngine.Debug.Log($"Note {note.fretNumber}-{note.stringNumber} at {note.time:F2}s: Resetting due to rewind (t < startTime).");
             }
 
             // 1. Spawning Logic: Spawn the note when it's time to start moving and it's not already spawned
             if (!note.isSpawned && t >= startTime && t < startTime + totalTravelTime)
             {
+                // UnityEngine.Debug.Log($"Note {note.fretNumber}-{note.stringNumber} at {note.time:F2}s: Spawning condition met. t: {t:F2}, startTime: {startTime:F2}, totalTravelTime: {totalTravelTime:F2}");
                 float noteX;
                 float scaleX;
                 float scaleY;
@@ -225,15 +245,52 @@ public class NoteHighway : MonoBehaviour
                 // Apply scale
                 go.transform.localScale = new Vector3(scaleX, scaleY, noteScaleZ);
 
+                // Handle sustain
+                if (note.sustain > 0)
+                {
+                    float speed = (spawnZ - hitZ) / adjustedNoteTravelTime;
+                    float sustainLength = note.sustain * speed;
+                    go.transform.localScale = new Vector3(scaleX, scaleY, sustainLength);
+                    // Adjust position to account for the new scale, so the front of the note is at the spawn position
+                    go.transform.position += new Vector3(0, 0, sustainLength / 2f);
+                }
+
                 note.noteObject = go;
                 note.isSpawned = true;
                 note.previousZPos = spawnZ; // Initialize previous position on spawn
 
                 // Set Note Material based on string
                 var renderer = go.GetComponent<Renderer>();
-                if (renderer != null && stringMaterials != null && note.stringNumber < stringMaterials.Length)
+                if (renderer != null)
                 {
-                    renderer.material = stringMaterials[note.stringNumber];
+                    if (note.palmMute && palmMuteMaterial != null)
+                    {
+                        renderer.material = palmMuteMaterial;
+                    }
+                    else if (note.mute && muteMaterial != null)
+                    {
+                        renderer.material = muteMaterial;
+                    }
+                    else if (note.accent && accentMaterial != null)
+                    {
+                        renderer.material = accentMaterial;
+                    }
+                    else if (note.hammerOn && hammerOnMaterial != null)
+                    {
+                        renderer.material = hammerOnMaterial;
+                    }
+                    else if (note.pullOff && pullOffMaterial != null)
+                    {
+                        renderer.material = pullOffMaterial;
+                    }
+                    else if (note.slideTo != -1 && slideMaterial != null)
+                    {
+                        renderer.material = slideMaterial;
+                    }
+                    else if (stringMaterials != null && note.stringNumber < stringMaterials.Length)
+                    {
+                        renderer.material = stringMaterials[note.stringNumber];
+                    }
                 }
 
                 // Show Fret Numbers (Option 1: Text Label)

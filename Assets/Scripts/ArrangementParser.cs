@@ -46,16 +46,52 @@ public static class ArrangementParser
                     fretAttr != null && int.TryParse(fretAttr.Value, out fret) &&
                     stringAttr != null && int.TryParse(stringAttr.Value, out stringIndex))
                 {
-                    // Create a unique key for the note: time|string|fret
-                    string noteKey = $"{time}|{stringIndex}|{fret}";
+                    // For uniqueness, base only on time/string/fret:
+                    string noteKey = $"{time:0.0000}{stringIndex}{fret}";
 
                     if (uniqueNoteKeys.Add(noteKey))
                     {
+                        var sustainAttr = noteElement.Attribute("sustain");
+                        var palmMuteAttr = noteElement.Attribute("palmMute");
+                        var muteAttr = noteElement.Attribute("mute");
+                        var accentAttr = noteElement.Attribute("accent");
+                        var slideToAttr = noteElement.Attribute("slideTo");
+                        var hammerOnAttr = noteElement.Attribute("hammerOn");
+                        var pullOffAttr = noteElement.Attribute("pullOff");
+
+                        float sustain = 0f; 
+                        if (sustainAttr != null) float.TryParse(sustainAttr.Value, out sustain);
+                        
+                        int palmMute = 0; 
+                        if (palmMuteAttr != null) int.TryParse(palmMuteAttr.Value, out palmMute);
+
+                        int mute = 0;
+                        if (muteAttr != null) int.TryParse(muteAttr.Value, out mute);
+
+                        int accent = 0;
+                        if (accentAttr != null) int.TryParse(accentAttr.Value, out accent);
+
+                        int slideTo = -1;
+                        if (slideToAttr != null) int.TryParse(slideToAttr.Value, out slideTo);
+
+                        int hammerOn = 0;
+                        if (hammerOnAttr != null) int.TryParse(hammerOnAttr.Value, out hammerOn);
+
+                        int pullOff = 0;
+                        if (pullOffAttr != null) int.TryParse(pullOffAttr.Value, out pullOff);
+
                         notes.Add(new NoteData
                         {
                             time = time,
                             fretNumber = fret,
-                            stringNumber = stringIndex
+                            stringNumber = stringIndex,
+                            sustain = sustain,
+                            palmMute = palmMute == 1,
+                            mute = mute == 1,
+                            accent = accent == 1,
+                            slideTo = slideTo,
+                            hammerOn = hammerOn == 1,
+                            pullOff = pullOff == 1
                         });
                     }
                     else
