@@ -43,11 +43,11 @@ public class Main : MonoBehaviour
         // Song Speed Slider setup
         if (songSpeedSlider != null)
         {
-            songSpeedSlider.minValue = -50f;
-            songSpeedSlider.maxValue = 50f;
-            songSpeedSlider.value = 0f;
+            songSpeedSlider.minValue = 50f;
+            songSpeedSlider.maxValue = 150f;
+            songSpeedSlider.value = 100f;
             songSpeedSlider.onValueChanged.AddListener(OnSongSpeedValueChanged);
-            UpdateSongSpeedLabel(0f);
+            UpdateSongSpeedLabel(100f);
         }
 
         // Set initial mute button text based on PsarcLoader's setting
@@ -99,8 +99,8 @@ public class Main : MonoBehaviour
             // 2. Reset song speed
             if (songSpeedSlider != null)
             {
-                songSpeedSlider.value = 0f;
-                OnSongSpeedValueChanged(0f);
+                songSpeedSlider.value = 100f;
+                UpdateSongSpeedLabel(100f);
             }
 
             // 3. Update play/pause button text based on actual playback state (fixes autoplay bug)
@@ -200,7 +200,9 @@ public class Main : MonoBehaviour
     {
         if (psarcLoader != null)
         {
-            psarcLoader.tempo = value;
+            // Convert slider value (50-150) to tempo change percentage (-50 to +50)
+            float tempoChange = value - 100;
+            psarcLoader.ChangeTempo(tempoChange);
         }
         UpdateSongSpeedLabel(value);
     }

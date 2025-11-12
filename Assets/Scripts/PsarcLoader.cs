@@ -18,6 +18,69 @@ public class PsarcLoader : MonoBehaviour
     public float tempo = 0f; // Public variable for song speed
 
     private string _lastDirectory = ""; // Stores the directory of the last opened PSARC file
+    private string _originalAudioPath = ""; // Stores the path to the original, unstretched audio file
+
+    public void ChangeTempo(float newTempo)
+    {
+        if (string.IsNullOrEmpty(_originalAudioPath) || !File.Exists(_originalAudioPath))
+        {
+            UnityEngine.Debug.LogWarning("Original audio path not set or file not found. Cannot change tempo.");
+            return;
+        }
+
+        float currentTime = 0f;
+        bool wasPlaying = false;
+
+        if (audioSource != null)
+        {
+            wasPlaying = audioSource.isPlaying;
+            currentTime = audioSource.time;
+            audioSource.Stop();
+        }
+
+        this.tempo = newTempo;
+
+        string stretchedAudioPath = SoundStretch.Process(_originalAudioPath, newTempo);
+        if (stretchedAudioPath != null)
+        {
+            StartCoroutine(ReloadAudio(stretchedAudioPath, currentTime, wasPlaying));
+        }
+        else
+        {
+            // If stretching fails, reload the original audio
+            StartCoroutine(ReloadAudio(_originalAudioPath, currentTime, wasPlaying));
+        }
+    }
+
+    IEnumerator ReloadAudio(string audioPath, float startTime, bool wasPlaying)
+    {
+        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(new System.Uri(audioPath).AbsoluteUri, AudioType.WAV))
+        {
+            yield return www.SendWebRequest();
+
+            if (www.result == UnityWebRequest.Result.Success)
+            {
+                AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
+                if (clip != null)
+                {
+                    audioSource.clip = clip;
+                    audioSource.time = startTime;
+                    if (wasPlaying)
+                    {
+                        audioSource.Play();
+                    }
+                }
+                else
+                {
+                    UnityEngine.Debug.LogError("Failed to reload audio clip.");
+                }
+            }
+            else
+            {
+                UnityEngine.Debug.LogError("Error loading stretched audio: " + www.error);
+            }
+        }
+    }
 
     public void TogglePlayback()
     {
@@ -134,6 +197,8 @@ public class PsarcLoader : MonoBehaviour
                     {
                         fileToLoadPath = tempPath;
                     }
+
+                    _originalAudioPath = fileToLoadPath; // Store the original path
                 }
                 else
                 {

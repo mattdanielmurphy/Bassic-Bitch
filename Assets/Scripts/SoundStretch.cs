@@ -32,7 +32,7 @@ public static class SoundStretch
         {
             Process chmodProcess = new Process();
             chmodProcess.StartInfo.FileName = "/bin/bash";
-            chmodProcess.StartInfo.Arguments = $"-c \"chmod +x \\"{cliPath}\\"\"";
+            chmodProcess.StartInfo.Arguments = $"-c \"chmod +x \\\"{cliPath}\\\"\"";
             chmodProcess.StartInfo.UseShellExecute = false;
             chmodProcess.StartInfo.RedirectStandardOutput = true;
             chmodProcess.StartInfo.RedirectStandardError = true;
@@ -50,7 +50,7 @@ public static class SoundStretch
 
         Process process = new Process();
         process.StartInfo.FileName = cliPath;
-        process.StartInfo.Arguments = $"\"{inputPath}\" \"{outputPath}\" -tempo={tempo}";
+        process.StartInfo.Arguments = $"\"{inputPath.Replace("\"", "\\\"")}\" \"{outputPath.Replace("\"", "\\\"")}\" -tempo={tempo}";
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;

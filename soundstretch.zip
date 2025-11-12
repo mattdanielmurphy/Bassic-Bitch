@@ -1,0 +1,171 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+  <meta http-equiv="Content-Language" content="en-us">
+  <meta name="GENERATOR" content="Microsoft FrontPage 12.0">
+  <meta name="ProgId" content="FrontPage.Editor.Document">
+  <title>SoundTouch Sound Processing Library</title>
+  <link rel="stylesheet" type="text/css" href="soundtouch.css">
+</head>
+
+<body class="normal">
+  <hr>
+  <div align="left">
+    <table border="0" cellspacing="6">
+      <tbody>
+        <tr>
+           <td align="left" valign="top" width="150">
+    <img border="0" src="soundtouch.jpg" width="144" height="144">
+    <p class="SideTitle">SoundTouch</p>
+
+    <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+    <a style="text-decoration: none;" href="index.html"><font color="#5050c5">About SoundTouch</font></a></p>
+
+      <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="soundstretch.html" style="text-decoration: none;"><font color="#5050c5">SoundStretch utility</font></a></p>
+
+      <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="download.html" style="text-decoration: none;"><font color="#5050c5">Download</font></a></p>
+
+        <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+            <a href="https://codeberg.org/soundtouch/soundtouch" style="text-decoration: none;">
+                <font color="#5050c5">
+                    Source codes
+                </font>
+            </a>
+        </p>
+
+        <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="soundstretch.html#examples" style="text-decoration: none;"><font
+ color="#5050c5">Audio Examples</font></a></p>
+
+      <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="README.html" style="text-decoration: none;"><font color="#5050c5">Readme</font></a></p>
+
+      <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="faq.html" style="text-decoration: none;"><font color="#5050c5">F.A.Q.</font></a></p>
+
+      <p class="sidelink" onmouseover="rollIn(this)" onmouseout="rollOut(this)">
+<a href="license.html" style="text-decoration: none;"><font color="#5050c5">License</font></a></p>
+
+      <p class="SideSpacer">.</p>
+
+      <p class="sidetext"><font color="#5050c5">Do you like SoundTouch? Then please support SoundTouch 
+      development and maintaining by a donation!</font></p>
+      <a href="donate.html"> <img
+ src="https://www.paypal.com/en_US/i/btn/x-click-but21.gif" align="left"
+ border="0" height="23" width="110"> </a>
+        <br>
+        <br>
+        <p class="sidetext">
+            <font color="#5050c5">
+                Unrestricted Royalty-free license also available for commercial purposes, 
+                please 
+			<a href="mailto:info@surina.net?subject=SoundTouch license inquiry">contact us for more information</a>!
+            </font>
+        </p>
+    <p class="SideSpacer">.</p>
+    <br>
+        <img alt="Audio Application development services" src="https://www.surina.net/pro/ad-sign-150.jpg" >          
+	 <p class="sidetext">
+        <font color="#2020c5"> 
+            Are you looking for professional audio application developer(s) to help in your project? <br><br>
+            <b><a href="https://www.surina.net/pro/index.html">Please look here!</a></b></font></p>
+            <br>
+    <p class="SideSpacer">.</p>
+</td>
+            <td style="width: 100%; vertical-align: top; text-align: left;">
+              <h1>SoundTouch Audio Processing Library</h1>
+              <h3>The source codes for the latest stable release are available in <a
+                  href="https://codeberg.org/soundtouch/soundtouch">the git repository</a></h3>
+              <hr>
+              <h3><a name="about"></a>About the SoundTouch library</h3>
+              <p>The SoundTouch Library Copyright &copy; Olli Parviainen 2001-2024</p>
+              <p>SoundTouch is an open-source
+                audio processing library for changing the Tempo, Pitch and
+                Playback Rates of audio streams or audio files. The library additionally
+                supports estimating stable beats-per-minute rates for audio tracks.</p>
+              <ul>
+                <li><strong>Tempo</strong> <strong>(time stretch)</strong>:
+                  Changes the sound to play at faster or slower tempo than originally
+                  without affecting the sound pitch.</li>
+                <li><strong>Pitch (key)</strong> : Changes the sound pitch or
+                  key while keeping the original tempo (speed).</li>
+                <li><strong>Playback Rate</strong> : Changes both
+                  tempo and pitch together as if a vinyl disc was played at different RPM
+                  rate.</li>
+              </ul>
+              <p>The SoundTouch library is intended&nbsp; for
+                application developers writing sound processing tools that
+                require tempo/pitch control functionality, or just for playing
+                around with the sound effects.</p>
+              <p>The SoundTouch library source kit includes also an example
+                utility <a href="https://www.surina.net/soundtouch/soundstretch.html">SoundStretch</a>
+                for
+                processing .wav audio files from command-line interface.</p>
+              <p><strong>Access </strong>the<b> </b>
+                <a href="https://codeberg.org/soundtouch/soundtouch"><strong>source
+                    codes in codeberg.org</strong></a> or <strong>download </strong>the compiled <a
+                  href="download.html"><strong>executables</strong></a><b>.</b>
+              </p>
+              <p><b>More information:</b></p>
+              <ul>
+                <li><a href="soundstretch.html#examples">Example
+                    sound clips</a> of each tempo/pitch/rate control mode</li>
+                <li> <a href="https://www.surina.net/soundtouch/applications.html">List of
+                    applications that use SoundTouch library</a></li>
+                <li> <a href="faq.html">Frequently Asked Questions</a></li>
+                <li>Theory behind how SoundTouch works - <i><a
+                      href="https://www.surina.net/article/time-and-pitch-scaling.html">read
+                      tutorial on audio time/pitch scaling basics</a></i> </li>
+              </ul>
+              <hr width="35%">
+              <h3><a name="features"></a>SoundTouch library Features</h3>
+              <ul>
+                <li>Open-source implementation</li>
+                <li>Supports any processor and OS platform
+                  with GNU C compiler (gcc) or Visual C++: Windows,
+                  Mac OS, Linux & other *nixes, Raspberry Pi,
+                  Android, Apple iOS...</li>
+                <li>Support 16bit integer and 32bit floating point mono/stereo/multi-channel
+                  audio formats</li>
+                <li>Real-time audio processing possible:
+                  <ul>
+                    <li>input/output stream latency max. ~ 100 ms</li>
+                    <li>Real-tome processing of CD quality stereo sound possible with a 133 Mhz Intel Pentium processor
+                      or better ;-)</li>
+                  </ul>
+                </li>
+                <li>Easy programming interface via a single C++ class</li>
+                <li>C++, C# and Java example applications</li>
+                <li>API interface modules for calling SoundTouch library routines from C#, Pascal/Delphi and Java</li>
+                <li>C++ implementation with MMX & SSE instruction set optimizations for x86 processors and
+                  OpenMP optimization for generic multi-core CPUs.</li>
+                <li>Licensed under the <a href="license.html"><strong>GNU
+                      Lesser
+                      General Public License (LGPL) v2.1</strong></a>. Commercial Non-LGPL license
+                  alternative available upon request.</li>
+              </ul>
+              <hr width="35%">
+              <h3><a name="contact"></a>Contact Information</h3>
+              <a href="https://www.surina.net/olli_personal.html">Author
+                contact information</a>.
+              <p>SoundTouch WWW page: <a href="https://www.surina.net/soundtouch">https://www.surina.net/soundtouch</a>
+              </p>
+            </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <hr>
+  <p align="center"><em><a style="text-decoration: none;" href="https://www.surina.net/olli_personal.html">Copyright
+        &copy; Olli
+        Parviainen</a></em></p>
+  <!--
+$Id: index.html 224 2015-09-20 08:12:49Z olli $
+-->
+</body>
+
+</html>
