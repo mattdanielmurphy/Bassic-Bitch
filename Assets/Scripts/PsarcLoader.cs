@@ -10,6 +10,7 @@ using SFB; // Assuming the StandaloneFileBrowser is in the SFB namespace
 
 public class PsarcLoader : MonoBehaviour
 {
+    public Main main; // Reference to the Main script to control UI elements
     public NoteHighway noteHighway; // Drag the NoteHighway GameObject here in the Inspector
     public bool startMuted = false; // Option to start the audio muted
     public AudioSource audioSource;
@@ -34,6 +35,8 @@ public class PsarcLoader : MonoBehaviour
             UnityEngine.Debug.LogWarning("Original audio path not set or file not found. Cannot change tempo.");
             return;
         }
+
+        main.SetLoadingText(true);
 
         float currentTime = 0f;
         bool wasPlaying = false;
@@ -94,12 +97,13 @@ public class PsarcLoader : MonoBehaviour
                 UnityEngine.Debug.LogError($"ReloadAudio: Error loading stretched audio: {www.error}");
             }
         }
+        
+        main.SetLoadingText(false);
     }
 
     public void TogglePlayback()
     {
         if (audioSource == null) return;
-
         if (audioSource.isPlaying)
         {
             audioSource.Pause();
@@ -130,6 +134,8 @@ public class PsarcLoader : MonoBehaviour
 
     public void OpenPsarcFileBrowser()
     {
+        main.SetLoadingText(true);
+
         var extensions = new [] {
             new ExtensionFilter("Rocksmith PSARC Files", "psarc" ),
             new ExtensionFilter("All Files", "*" ),
@@ -144,6 +150,7 @@ public class PsarcLoader : MonoBehaviour
             else
             {
                 UnityEngine.Debug.Log("File selection cancelled or failed.");
+                main.SetLoadingText(false);
             }
         });
     }
@@ -245,6 +252,7 @@ public class PsarcLoader : MonoBehaviour
         catch (System.Exception e)
         {
             UnityEngine.Debug.LogError("Error parsing PSARC file: " + e.Message);
+            main.SetLoadingText(false);
         }
     }
 
@@ -298,7 +306,7 @@ public class PsarcLoader : MonoBehaviour
         process.StartInfo.Arguments = $"-o \"{wavFilePath}\" \"{wemFilePath}\"";
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
+        process.StartInfo.RedirectStandardError = true;
         
         try
         {
@@ -387,5 +395,7 @@ public class PsarcLoader : MonoBehaviour
                 UnityEngine.Debug.LogError("Error loading audio: " + www.error);
             }
         }
+
+        main.SetLoadingText(false);
     }
 }

@@ -15,10 +15,19 @@ public class Main : MonoBehaviour
     public TextMeshProUGUI videoOffsetLabel; // Label to display the current video offset value
     public Slider songSpeedSlider; // Slider for song speed
     public TextMeshProUGUI songSpeedLabel; // Label to display the current song speed value
+    public TextMeshProUGUI loadingText; // Reference to the loading text UI element
 
     private bool isPlaying = false;
     private float _initialVideoOffsetMs = 0f; // Store the default value from NoteHighway.cs on startup
     private bool isUpdatingScrubberFromCode = false; // Flag to prevent feedback loop
+
+    public void SetLoadingText(bool isLoading)
+    {
+        if (loadingText != null)
+        {
+            loadingText.gameObject.SetActive(isLoading);
+        }
+    }
 
     void Start()
     {
