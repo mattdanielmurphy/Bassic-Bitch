@@ -45,9 +45,8 @@ public class Main : MonoBehaviour
         {
             songSpeedSlider.minValue = 50f;
             songSpeedSlider.maxValue = 150f;
-            songSpeedSlider.value = 100f;
-            songSpeedSlider.onValueChanged.AddListener(OnSongSpeedValueChanged);
-            UpdateSongSpeedLabel(100f);
+            songSpeedSlider.value = 70f; // Hardcoded to 70%
+            UpdateSongSpeedLabel(70f);
         }
 
         // Set initial mute button text based on PsarcLoader's setting
@@ -96,14 +95,7 @@ public class Main : MonoBehaviour
                 UpdateVideoOffsetLabel(_initialVideoOffsetMs); // Update label on song load
             }
 
-            // 2. Reset song speed
-            if (songSpeedSlider != null)
-            {
-                songSpeedSlider.value = 100f;
-                UpdateSongSpeedLabel(100f);
-            }
-
-            // 3. Update play/pause button text based on actual playback state (fixes autoplay bug)
+            // 2. Update play/pause button text based on actual playback state (fixes autoplay bug)
             isPlaying = psarcLoader.audioSource != null && psarcLoader.audioSource.isPlaying;
             UpdatePlayPauseButtonText();
         }
@@ -193,25 +185,6 @@ public class Main : MonoBehaviour
         if (videoOffsetLabel != null)
         {
             videoOffsetLabel.text = $"Video Offset: {offsetMs:F0}ms";
-        }
-    }
-
-    void OnSongSpeedValueChanged(float value)
-    {
-        if (psarcLoader != null)
-        {
-            // Convert slider value (50-150) to tempo change percentage (-50 to +50)
-            float tempoChange = value - 100;
-            psarcLoader.ChangeTempo(tempoChange);
-        }
-        UpdateSongSpeedLabel(value);
-    }
-
-    void UpdateSongSpeedLabel(float speed)
-    {
-        if (songSpeedLabel != null)
-        {
-            songSpeedLabel.text = $"Speed: {speed:F0}%";
         }
     }
 }

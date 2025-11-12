@@ -55,18 +55,31 @@ public static class SoundStretch
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
 
+        UnityEngine.Debug.Log($"SoundStretch: Input Path: {inputPath}");
+        UnityEngine.Debug.Log($"SoundStretch: Output Path: {outputPath}");
+        UnityEngine.Debug.Log($"SoundStretch: Tempo: {tempo}");
+        UnityEngine.Debug.Log($"SoundStretch: CLI Path: {cliPath}");
+        UnityEngine.Debug.Log($"SoundStretch: Arguments: {process.StartInfo.Arguments}");
+
         try
         {
             process.Start();
             process.WaitForExit();
 
+            string stdOut = process.StandardOutput.ReadToEnd();
+            string stdErr = process.StandardError.ReadToEnd();
+
+            UnityEngine.Debug.Log($"SoundStretch STDOUT: {stdOut}");
+            UnityEngine.Debug.Log($"SoundStretch STDERR: {stdErr}");
+
             if (process.ExitCode == 0)
             {
+                UnityEngine.Debug.Log($"SoundStretch: Successfully processed audio to {outputPath}");
                 return outputPath;
             }
             else
             {
-                UnityEngine.Debug.LogError($"SoundStretch failed with exit code {process.ExitCode}.\nSTDERR: {process.StandardError.ReadToEnd()}");
+                UnityEngine.Debug.LogError($"SoundStretch failed with exit code {process.ExitCode}.\nSTDERR: {stdErr}");
                 return null;
             }
         }

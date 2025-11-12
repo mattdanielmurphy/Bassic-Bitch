@@ -15,13 +15,14 @@ public class PsarcLoader : MonoBehaviour
     public AudioSource audioSource;
     [Tooltip("Audio offset in milliseconds. Positive values delay the notes.")]
     public float videoOffsetMs = 0f; // Public variable for audio synchronization offset
-    public float tempo = 0f; // Public variable for song speed
+    public float tempo = -30f; // Public variable for song speed, hardcoded to 70% (100 - 30)
 
     private string _lastDirectory = ""; // Stores the directory of the last opened PSARC file
     private string _originalAudioPath = ""; // Stores the path to the original, unstretched audio file
 
     public void ChangeTempo(float newTempo)
     {
+        UnityEngine.Debug.Log($"ChangeTempo called with newTempo: {newTempo}");
         if (string.IsNullOrEmpty(_originalAudioPath) || !File.Exists(_originalAudioPath))
         {
             UnityEngine.Debug.LogWarning("Original audio path not set or file not found. Cannot change tempo.");
@@ -36,24 +37,31 @@ public class PsarcLoader : MonoBehaviour
             wasPlaying = audioSource.isPlaying;
             currentTime = audioSource.time;
             audioSource.Stop();
+            UnityEngine.Debug.Log($"Audio was playing: {wasPlaying}, current time: {currentTime}");
         }
 
         this.tempo = newTempo;
+        UnityEngine.Debug.Log($"PsarcLoader.tempo set to: {this.tempo}");
 
         string stretchedAudioPath = SoundStretch.Process(_originalAudioPath, newTempo);
         if (stretchedAudioPath != null)
         {
+            UnityEngine.Debug.Log($"SoundStretch returned stretched audio path: {stretchedAudioPath}");
             StartCoroutine(ReloadAudio(stretchedAudioPath, currentTime, wasPlaying));
         }
         else
         {
-            // If stretching fails, reload the original audio
+            UnityEngine.Debug.LogError("SoundStretch failed, falling back to original audio.");
+            // Fallback to original audio if stretching fails
             StartCoroutine(ReloadAudio(_originalAudioPath, currentTime, wasPlaying));
         }
     }
 
     IEnumerator ReloadAudio(string audioPath, float startTime, bool wasPlaying)
     {
+        UnityEngine.Debug.Log($"ReloadAudio: Loading audio from: {audioPath}");
+        UnityEngine.Debug.Log($"ReloadAudio: Start time: {startTime}, Was playing: {wasPlaying}");
+
         using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(new System.Uri(audioPath).AbsoluteUri, AudioType.WAV))
         {
             yield return www.SendWebRequest();
@@ -69,15 +77,16 @@ public class PsarcLoader : MonoBehaviour
                     {
                         audioSource.Play();
                     }
+                    UnityEngine.Debug.Log($"ReloadAudio: Successfully reloaded audio. Clip length: {clip.length}");
                 }
                 else
                 {
-                    UnityEngine.Debug.LogError("Failed to reload audio clip.");
+                    UnityEngine.Debug.LogError("ReloadAudio: Failed to reload audio clip (GetContent returned null).");
                 }
             }
             else
             {
-                UnityEngine.Debug.LogError("Error loading stretched audio: " + www.error);
+                UnityEngine.Debug.LogError($"ReloadAudio: Error loading stretched audio: {www.error}");
             }
         }
     }
