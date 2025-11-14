@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.InputSystem; // Required for the new Input System
+using System.Collections.Generic;
 
 public class Main : MonoBehaviour
 {
@@ -15,10 +16,12 @@ public class Main : MonoBehaviour
     public TextMeshProUGUI videoOffsetLabel; // Label to display the current video offset value
     public Slider songSpeedSlider; // Slider for song speed
     public TextMeshProUGUI songSpeedLabel; // Label to display the current song speed value
+    public Button applySpeedButton; // Button to apply the pending speed change
     public TextMeshProUGUI loadingText; // Reference to the loading text UI element
 
     private bool isPlaying = false;
     private float _initialVideoOffsetMs = 0f; // Store the default value from NoteHighway.cs on startup
+    private float _appliedSongSpeed = 100f; // Store the currently applied song speed
     private bool isUpdatingScrubberFromCode = false; // Flag to prevent feedback loop
 
     public void SetLoadingText(bool isLoading)
@@ -54,9 +57,17 @@ public class Main : MonoBehaviour
         {
             songSpeedSlider.minValue = 50f;
             songSpeedSlider.maxValue = 150f;
-            songSpeedSlider.value = 100f;
+            _appliedSongSpeed = 100f; // Initialize applied speed
+            songSpeedSlider.value = _appliedSongSpeed;
             songSpeedSlider.onValueChanged.AddListener(OnSongSpeedValueChanged);
-            UpdateSongSpeedLabel(100f);
+            UpdateSongSpeedLabel(_appliedSongSpeed);
+        }
+
+        // Apply Speed Button setup
+        if (applySpeedButton != null)
+        {
+            applySpeedButton.onClick.AddListener(ApplySongSpeedChange);
+            applySpeedButton.gameObject.SetActive(false); // Hide initially
         }
 
         // Set initial mute button text based on PsarcLoader's setting
@@ -80,6 +91,16 @@ public class Main : MonoBehaviour
         if (Keyboard.current.mKey.wasPressedThisFrame)
         {
             ToggleMute();
+        }
+
+        if (Keyboard.current.leftArrowKey.wasPressedThisFrame)
+        {
+            NavigateByBar(-1);
+        }
+
+        if (Keyboard.current.rightArrowKey.wasPressedThisFrame)
+        {
+            NavigateByBar(1);
         }
 
         if (psarcLoader?.audioSource?.clip != null && psarcLoader.audioSource.isPlaying)
@@ -108,9 +129,17 @@ public class Main : MonoBehaviour
             // 2. Reset song speed
             if (songSpeedSlider != null)
             {
-                songSpeedSlider.value = 100f;
-                psarcLoader.SetSongSpeed(100f);
-                UpdateSongSpeedLabel(100f);
+                const float defaultSpeed = 100f;
+                songSpeedSlider.value = defaultSpeed;
+                _appliedSongSpeed = defaultSpeed; // Reset applied speed tracker
+                psarcLoader.SetSongSpeed(defaultSpeed);
+                UpdateSongSpeedLabel(defaultSpeed);
+                
+                // Ensure the apply button is hidden after reset
+                if (applySpeedButton != null)
+                {
+                    applySpeedButton.gameObject.SetActive(false);
+                }
             }
 
             // 3. Update play/pause button text based on actual playback state (fixes autoplay bug)
@@ -202,24 +231,94 @@ public class Main : MonoBehaviour
     {
         if (videoOffsetLabel != null)
         {
-            videoOffsetLabel.text = $"Video Offset: {offsetMs:F0}ms";
+            // DO NOT CHANGE THIS LABEL!
+            videoOffsetLabel.text = $"{offsetMs:F0}ms";
         }
     }
 
     void OnSongSpeedValueChanged(float value)
     {
-        if (psarcLoader != null)
-        {
-            psarcLoader.SetSongSpeed(value);
-        }
         UpdateSongSpeedLabel(value);
+        
+        // Show/hide the apply button if the slider value differs from the applied speed
+        if (applySpeedButton != null)
+        {
+            // Using a small threshold for float comparison, comparing against the last applied speed
+            // This is primarily for discrete controls (like a speed slider with integer steps)
+            bool hasPendingChange = Mathf.Abs(value - _appliedSongSpeed) > 0.1f; 
+            applySpeedButton.gameObject.SetActive(hasPendingChange);
+        }
     }
-
+    
     void UpdateSongSpeedLabel(float speed)
     {
         if (songSpeedLabel != null)
         {
-            songSpeedLabel.text = $"Speed: {speed:F0}%";
+            // DO NOT CHANGE THIS LABEL!
+            songSpeedLabel.text = $"{speed:F0}%";
         }
+    }
+
+    void ApplySongSpeedChange()
+    {
+        if (psarcLoader != null)
+        {
+            float newSpeed = songSpeedSlider.value;
+            psarcLoader.SetSongSpeed(newSpeed);
+            _appliedSongSpeed = newSpeed;
+        }
+
+        // Hide the button after applying the change
+        if (applySpeedButton != null)
+        {
+            applySpeedButton.gameObject.SetActive(false);
+        }
+    }
+
+    void NavigateByBar(int direction)
+    {
+        if (psarcLoader?.audioSource?.clip == null || psarcLoader.ArrangementData?.BarTimes == null) return;
+
+        float currentTime = psarcLoader.audioSource.time;
+        List<float> barTimes = psarcLoader.ArrangementData.BarTimes;
+
+        // Find the current bar index
+        int currentBarIndex = -1;
+        for (int i = 0; i < barTimes.Count; i++)
+        {
+            if (currentTime < barTimes[i])
+            {
+                currentBarIndex = i - 1;
+                break;
+            }
+        }
+        // If we are past the last bar, set currentBarIndex to the last bar
+        if (currentBarIndex == -1 && barTimes.Count > 0 && currentTime >= barTimes[barTimes.Count - 1])
+        {
+            currentBarIndex = barTimes.Count - 1;
+        }
+        // If we are before the first bar, set currentBarIndex to -1 (or 0 if moving forward)
+        if (currentBarIndex == -1 && barTimes.Count > 0 && currentTime < barTimes[0])
+        {
+            currentBarIndex = -1;
+        }
+
+        int targetBarIndex = currentBarIndex + direction;
+
+        // Clamp the target index
+        if (targetBarIndex < 0)
+        {
+            targetBarIndex = 0;
+        }
+        else if (targetBarIndex >= barTimes.Count)
+        {
+            targetBarIndex = barTimes.Count - 1;
+        }
+
+        // Get the target time
+        float targetTime = barTimes[targetBarIndex];
+
+        // Jump to the target time
+        psarcLoader.JumpToTime(targetTime);
     }
 }

@@ -19,12 +19,30 @@ public class PsarcLoader : MonoBehaviour
 
     private string _lastDirectory = ""; // Stores the directory of the last opened PSARC file
     private string _originalAudioPath = ""; // Stores the path to the original, unstretched audio file
+    private ArrangementData _arrangementData; // Stores the parsed arrangement data (notes and bar times)
+
+    public ArrangementData ArrangementData => _arrangementData;
 
     public void SetSongSpeed(float percentage)
     {
         currentSongSpeedPercentage = percentage;
         float tempoChange = percentage - 100f; // Calculate the tempo change for soundstretch
         ChangeTempo(tempoChange);
+    }
+
+    public void JumpToTime(float time)
+    {
+        if (audioSource?.clip == null) return;
+
+        // Clamp time to clip length
+        float clampedTime = Mathf.Clamp(time, 0f, audioSource.clip.length);
+        audioSource.time = clampedTime;
+
+        // If the audio is paused, ensure the NoteHighway updates its position immediately
+        if (!audioSource.isPlaying && noteHighway != null)
+        {
+            noteHighway.UpdateHighwayPosition();
+        }
     }
 
     public void ChangeTempo(float tempoChange)
@@ -118,6 +136,10 @@ public class PsarcLoader : MonoBehaviour
 
     void Start()
     {
+        if (main == null)
+        {
+            main = FindObjectOfType<Main>();
+        }
         audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.mute = startMuted;
         OpenPsarcFileBrowser();
@@ -134,7 +156,10 @@ public class PsarcLoader : MonoBehaviour
 
     public void OpenPsarcFileBrowser()
     {
-        main.SetLoadingText(true);
+        if (main != null)
+        {
+            main.SetLoadingText(true);
+        }
 
         var extensions = new [] {
             new ExtensionFilter("Rocksmith PSARC Files", "psarc" ),
@@ -150,7 +175,10 @@ public class PsarcLoader : MonoBehaviour
             else
             {
                 UnityEngine.Debug.Log("File selection cancelled or failed.");
-                main.SetLoadingText(false);
+                if (main != null)
+                {
+                    main.SetLoadingText(false);
+                }
             }
         });
     }
@@ -163,13 +191,12 @@ public class PsarcLoader : MonoBehaviour
             return;
         }
 
-        // Save the directory of the loaded file for the next file browser open
         _lastDirectory = Path.GetDirectoryName(psarcFilePath);
 
-        // Reset the NoteHighway immediately to clear old notes and stop processing
         if (noteHighway != null)
         {
-            noteHighway.ResetNotes();
+            // Call the new reset method
+            noteHighway.ResetHighway();
         }
 
         try
@@ -178,7 +205,6 @@ public class PsarcLoader : MonoBehaviour
             {
                 UnityEngine.Debug.Log("Opened PSARC file: " + psarcFilePath);
 
-                // 1. Find and extract audio
                 var audioEntry = psarc.TOC.Entries.FirstOrDefault(e => e.Path != null && (e.Path.EndsWith(".ogg") || e.Path.EndsWith(".wem")));
                 string fileToLoadPath = null;
 
@@ -219,7 +245,7 @@ public class PsarcLoader : MonoBehaviour
                         fileToLoadPath = tempPath;
                     }
 
-                    _originalAudioPath = fileToLoadPath; // Store the original path
+                    _originalAudioPath = fileToLoadPath;
                 }
                 else
                 {
@@ -227,7 +253,6 @@ public class PsarcLoader : MonoBehaviour
                     return;
                 }
 
-                // 2. Find and extract arrangement XML
                 var arrangementEntry = psarc.TOC.Entries.FirstOrDefault(e => e.Path != null && e.Path.EndsWith("_bass.xml"));
                 string arrangementTempPath = null;
 
@@ -243,9 +268,7 @@ public class PsarcLoader : MonoBehaviour
                     return;
                 }
 
-                // 3. Start the asynchronous loading of audio and notes
-                // Apply initial song speed
-                SetSongSpeed(songSpeedPercentage); // Apply the default song speed
+                SetSongSpeed(songSpeedPercentage);
                 StartCoroutine(LoadAudioAndNotes(_originalAudioPath, arrangementTempPath));
             }
         }
@@ -278,10 +301,8 @@ public class PsarcLoader : MonoBehaviour
             return false;
         }
 
-        // On macOS/Linux, ensure the executable has execute permissions
         if (Application.platform != RuntimePlatform.WindowsPlayer && Application.platform != RuntimePlatform.WindowsEditor)
         {
-            // This command is executed via the shell to ensure permissions are set
             Process chmodProcess = new Process();
             chmodProcess.StartInfo.FileName = "/bin/bash";
             chmodProcess.StartInfo.Arguments = $"-c \"chmod +x \\\"{cliPath}\\\"\"";
@@ -297,11 +318,8 @@ public class PsarcLoader : MonoBehaviour
                 return false;
             }
         }
-
-        // UnityEngine.Debug.Log($"Converting WEM to WAV using: {cliPath}");
         
         Process process = new Process();
-        // Command: vgmstream-cli -o <output> <input>
         process.StartInfo.FileName = cliPath;
         process.StartInfo.Arguments = $"-o \"{wavFilePath}\" \"{wemFilePath}\"";
         process.StartInfo.UseShellExecute = false;
@@ -315,17 +333,12 @@ public class PsarcLoader : MonoBehaviour
 
             if (process.ExitCode == 0)
             {
-                // Check if the output file was actually created and has content
                 FileInfo wavFileInfo = new FileInfo(wavFilePath);
                 if (!wavFileInfo.Exists || wavFileInfo.Length == 0)
                 {
                     UnityEngine.Debug.LogError($"WEM conversion succeeded (Exit Code 0) but output WAV file is missing or empty: {wavFilePath}");
                     return false;
                 }
-
-                // UnityEngine.Debug.Log($"WEM conversion successful. Output file size: {wavFileInfo.Length} bytes.");
-                // Log output for debugging
-                // UnityEngine.Debug.Log($"vgmstream-cli STDOUT: {process.StandardOutput.ReadToEnd()}");
                 return true;
             }
             else
@@ -343,15 +356,11 @@ public class PsarcLoader : MonoBehaviour
 
     IEnumerator LoadAudioAndNotes(string audioFilePath, string arrangementFilePath)
     {
-        // 1. Load Audio
         string uri = new System.Uri(audioFilePath).AbsoluteUri;
         string extension = Path.GetExtension(audioFilePath).ToLower();
         AudioType audioType = AudioType.UNKNOWN;
 
-        if (extension == ".wav")
-        {
-            audioType = AudioType.WAV;
-        }
+        if (extension == ".wav") audioType = AudioType.WAV;
 
         if (!File.Exists(audioFilePath))
         {
@@ -373,17 +382,16 @@ public class PsarcLoader : MonoBehaviour
                 }
                 audioSource.clip = clip;
                 
-                // 2. Parse Notes (Synchronous)
-                List<NoteData> notes = ArrangementParser.ParseArrangement(arrangementFilePath);
+                _arrangementData = ArrangementParser.ParseArrangement(arrangementFilePath);
                 
-                // 3. Assign Notes and Start Playback (Ensures notes are ready right before audio starts)
                 if (noteHighway != null)
                 {
-                    noteHighway.psarcLoader = this; // Assign this PsarcLoader instance
-                    noteHighway.notes = notes;
+                    noteHighway.psarcLoader = this;
+                    noteHighway.notes = _arrangementData.Notes;
+                    // Use the new method to set bar times and create marker data
+                    noteHighway.SetBarTimes(_arrangementData.BarTimes);
                     noteHighway.audioSource = audioSource;
                     audioSource.Play();
-                    // UnityEngine.Debug.Log("Playing audio: " + audioFilePath);
                 }
                 else
                 {

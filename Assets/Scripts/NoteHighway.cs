@@ -15,6 +15,12 @@ public class NoteHighway : MonoBehaviour
     public float noteTravelTime = 50f;          // How long notes take to reach hit line
     public Main main;                           // Reference to the Main script for scrubbing state
     public PsarcLoader psarcLoader;             // Reference to PsarcLoader for song speed
+    
+    // Private list for bar times, managed via public method
+    private List<float> barTimes;
+    // New list to manage our dynamic bar markers
+    private List<BarMarkerData> barMarkers = new List<BarMarkerData>();
+
 
     [Header("Fret Label")]
     public GameObject fretLabelPrefab;       // Prefab for the fret number text label
@@ -57,6 +63,24 @@ public class NoteHighway : MonoBehaviour
     public float fretboardLinesZHeight = 0.5f; // New field for the tiny height
     public int maxFretNumber = 24;
 
+    [Header("Bar Marker Visuals")]
+    public Material barMarkerMaterial;
+    // Horizontal Line (X-axis)
+    public float barLineYPosition = -3.0f;      // Y position for the horizontal bar line (default to fretboardLinesZYOffset)
+    public float barLineThickness = 0.5f;       // Thickness of the bar line on the Y-axis
+    public float fretboardBarLineTotalWidth = 80f; // Total width of the bar line on the X-axis (default to stringWidth)
+    public float barLineXCenterOffset = 0f;     // X offset for centering the horizontal line
+
+    // Label Positioning
+    public float barLabelXOffsetFromStart = -10.0f; // Horizontal offset for the label from the start of the line
+    public float barLabelYOffsetAboveLine = 2.0f;   // Vertical offset for the label above the line
+    public TextAlignmentOptions barLabelTextAlignment = TextAlignmentOptions.MidlineRight; // Alignment for the bar number label
+
+    // Left Bar Marker Line (Y-axis)
+    public float leftBarMarkerLineHeight = 5.0f;    // Height of the new Y-axis line
+    public float leftBarMarkerLineThickness = 0.5f; // Thickness of the new Y-axis line
+    public float leftBarMarkerLineXOffset = -5.0f;  // X offset for the left bar marker line from the start of the horizontal bar line
+
     [Header("Inlay Dots")]
     public Material inlayDotMaterial;
     public float inlayDotScale = 1.0f;
@@ -65,11 +89,36 @@ public class NoteHighway : MonoBehaviour
 
     void Start()
     {
+        // Calculate the width of the fretboard and set it to the bar line width
+        // The width is calculated from the center of fret 0 to the center of maxFretNumber.
+        fretboardBarLineTotalWidth = maxFretNumber * fretSpacing;
+
         // Do NOT log warnings about notes/audioSource here!
         CreateFretboardStrings();
         CreateFretboardVisuals();
         CreateFretboardLinesZ(); // New call to create lines extending down the highway
     }
+    
+    /// <summary>
+    /// Receives bar times from PsarcLoader and populates the bar marker data.
+    /// </summary>
+    public void SetBarTimes(List<float> newBarTimes)
+    {
+        this.barTimes = newBarTimes;
+        barMarkers.Clear(); // Clear any old data
+
+        if (this.barTimes == null) return;
+        
+        for (int i = 0; i < this.barTimes.Count; i++)
+        {
+            barMarkers.Add(new BarMarkerData
+            {
+                time = this.barTimes[i],
+                barNumber = i + 1 // Bar numbers are 1-based
+            });
+        }
+    }
+
 
     // 1. Lane Positioning Functions
     // String to Y (vertical):
@@ -140,16 +189,13 @@ public class NoteHighway : MonoBehaviour
             }
         }
     }
+    
+    // DELETED: The old CreateBarMarkers() method is no longer needed.
 
     void Update() {
         if (audioSource == null)
         {
-            UnityEngine.Debug.LogWarning("NoteHighway Update: audioSource is null. Waiting for PsarcLoader to assign.");
-            return;
-        }
-        if (notes == null || notes.Count == 0)
-        {
-            UnityEngine.Debug.LogWarning("NoteHighway Update: notes list is null or empty. Waiting for PsarcLoader to assign.");
+            // This is normal before a song is loaded.
             return;
         }
         if (psarcLoader == null)
@@ -166,20 +212,115 @@ public class NoteHighway : MonoBehaviour
 
         // Determine the effective despawn Z and total travel time based on the dev mode
         float effectiveDespawnZ = devNotePositioningMode ? hitZ : despawnZOffset;
-        float totalTravelTime;
+        float speed = (spawnZ - hitZ) / adjustedNoteTravelTime;
+        float timeToDespawn = (hitZ - effectiveDespawnZ) / speed;
+        float totalTravelTime = adjustedNoteTravelTime + timeToDespawn;
 
-        if (devNotePositioningMode)
+        // Apply the video offset (converted to seconds) to the bar markers
+        float offsetSeconds = -videoOffsetMs / 1000f;
+
+        // --- NEW Bar Marker Spawning and Movement Logic ---
+        if (barMarkers != null)
         {
-            // If in dev mode, notes stop at hitZ, so total travel time is just adjustedNoteTravelTime
-            totalTravelTime = adjustedNoteTravelTime;
+            foreach (var bar in barMarkers)
+            {
+                float adjustedBarTime = bar.time / (currentSongSpeedPercentage / 100f);
+                float startTime = adjustedBarTime - adjustedNoteTravelTime - offsetSeconds;
+
+                // Rewind/Reset Logic
+                if (t < startTime && bar.isSpawned)
+                {
+                    if (bar.markerObject != null) Destroy(bar.markerObject);
+                    if (bar.labelObject != null) Destroy(bar.labelObject);
+                    if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
+                    bar.isSpawned = false;
+                }
+
+                // Spawning Logic
+                if (!bar.isSpawned && t >= startTime && t < startTime + totalTravelTime)
+                {
+                    // Calculate positions
+                    float lineStartX = barLineXCenterOffset - (fretboardBarLineTotalWidth / 2f);
+                    float lineCenterY = barLineYPosition;
+                    
+                    // 1. Create the visual horizontal line (X-axis)
+                    GameObject markerLine = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    markerLine.name = $"BarMarkerLine_{bar.barNumber}";
+                    markerLine.transform.SetParent(transform);
+                    markerLine.transform.position = new Vector3(barLineXCenterOffset, lineCenterY, spawnZ);
+                    markerLine.transform.localScale = new Vector3(fretboardBarLineTotalWidth, barLineThickness, 1f);
+                    
+                    Renderer renderer = markerLine.GetComponent<Renderer>();
+                    if (renderer != null && barMarkerMaterial != null) renderer.material = barMarkerMaterial;
+                    Collider collider = markerLine.GetComponent<Collider>();
+                    if (collider != null) collider.enabled = false;
+                    
+                    bar.markerObject = markerLine;
+
+                    // 2. Create the left bar marker line (Y-axis)
+                    float leftLineX = lineStartX + leftBarMarkerLineXOffset;
+                    float leftLineCenterY = lineCenterY + (leftBarMarkerLineHeight / 2f); // Center is above the horizontal line
+                    
+                    GameObject perpLine = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    perpLine.name = $"LeftBarMarkerLine_{bar.barNumber}";
+                    perpLine.transform.SetParent(transform);
+                    perpLine.transform.position = new Vector3(leftLineX, leftLineCenterY, spawnZ);
+                    perpLine.transform.localScale = new Vector3(leftBarMarkerLineThickness, leftBarMarkerLineHeight, 1f);
+
+                    Renderer perpRenderer = perpLine.GetComponent<Renderer>();
+                    if (perpRenderer != null && barMarkerMaterial != null) perpRenderer.material = barMarkerMaterial;
+                    Collider perpCollider = perpLine.GetComponent<Collider>();
+                    if (perpCollider != null) perpCollider.enabled = false;
+                    
+                    bar.perpendicularObject = perpLine;
+
+                    // 3. Create the text label
+                    if (fretLabelPrefab != null)
+                    {
+                        float labelX = lineStartX + barLabelXOffsetFromStart;
+                        float labelY = lineCenterY + (barLineThickness / 2f) + barLabelYOffsetAboveLine;
+                        Vector3 labelPos = new Vector3(labelX, labelY, spawnZ);
+                        
+                        GameObject labelGO = Instantiate(fretLabelPrefab, labelPos, Quaternion.identity, transform);
+                        labelGO.name = $"BarLabel_{bar.barNumber}";
+                        
+                        var labelText = labelGO.GetComponent<TextMeshPro>();
+                        if (labelText != null)
+                        {
+                            labelText.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
+                            labelText.text = bar.barNumber.ToString();
+                            labelText.fontSize = fretLabelFontSize;
+                            labelText.alignment = barLabelTextAlignment; // Apply the new alignment
+                        }
+                        bar.labelObject = labelGO;
+                    }
+                    bar.isSpawned = true;
+                }
+
+                // Movement and Despawning Logic
+                if (bar.isSpawned)
+                {
+                    float timeSinceSpawn = t - startTime;
+                    float progress = Mathf.Clamp01(timeSinceSpawn / totalTravelTime);
+                    float zPos = Mathf.Lerp(spawnZ, effectiveDespawnZ, progress);
+
+                    if (bar.markerObject != null) bar.markerObject.transform.position = new Vector3(bar.markerObject.transform.position.x, bar.markerObject.transform.position.y, zPos);
+                    if (bar.labelObject != null) bar.labelObject.transform.position = new Vector3(bar.labelObject.transform.position.x, bar.labelObject.transform.position.y, zPos);
+                    if (bar.perpendicularObject != null) bar.perpendicularObject.transform.position = new Vector3(bar.perpendicularObject.transform.position.x, bar.perpendicularObject.transform.position.y, zPos);
+
+                    if (timeSinceSpawn >= totalTravelTime)
+                    {
+                        if (bar.markerObject != null) Destroy(bar.markerObject);
+                        if (bar.labelObject != null) Destroy(bar.labelObject);
+                        if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
+                        bar.isSpawned = false;
+                    }
+                }
+            }
         }
-        else
-        {
-            // Calculate the total time for a note to travel from spawnZ to effectiveDespawnZ (-2f)
-            float speed = (spawnZ - hitZ) / adjustedNoteTravelTime;
-            float timeToDespawn = (hitZ - effectiveDespawnZ) / speed;
-            totalTravelTime = adjustedNoteTravelTime + timeToDespawn;
-        }
+        // --- End of NEW Bar Marker Logic ---
+
+        if (notes == null) return; // Exit if no notes are loaded
 
         foreach (var note in notes) {
             // Apply the video offset (converted to seconds) to the note's time
@@ -189,9 +330,7 @@ public class NoteHighway : MonoBehaviour
             float adjustedNoteTime = note.time / (psarcLoader.currentSongSpeedPercentage / 100f);
             float startTime = adjustedNoteTime - adjustedNoteTravelTime - offsetSeconds;
             
-            // REWIND/RESET LOGIC: If music time goes before the note's start time, reset the note's state.
-            // The 'note.isSpawned' check was removed to ensure notes that were previously hit (and thus
-            // not spawned) are also reset, allowing them to be re-spawned and hit again after a rewind.
+            // REWIND/RESET LOGIC:
             if (t < startTime)
             {
                 if (note.noteObject != null)
@@ -207,168 +346,104 @@ public class NoteHighway : MonoBehaviour
                 note.isSpawned = false;
                 note.hitMarkerSpawned = false;
                 note.previousZPos = -1f; // Reset previous position
-                // UnityEngine.Debug.Log($"Note {note.fretNumber}-{note.stringNumber} at {note.time:F2}s: Resetting due to rewind (t < startTime).");
             }
 
-            // 1. Spawning Logic: Spawn the note when it's time to start moving and it's not already spawned
+            // 1. Spawning Logic:
             if (!note.isSpawned && t >= startTime && t < startTime + totalTravelTime)
             {
-                // UnityEngine.Debug.Log($"Note {note.fretNumber}-{note.stringNumber} at {note.time:F2}s: Spawning condition met. t: {t:F2}, startTime: {startTime:F2}, totalTravelTime: {totalTravelTime:F2}");
                 float noteX;
                 float scaleX;
                 float scaleY;
 
                 if (note.fretNumber == 0)
                 {
-                    // Open string note: make it a long line
                     noteX = fretOffset + zeroFretNoteWidth / 2f + zeroFretNoteXOffset;
                     scaleX = zeroFretNoteWidth;
-                    scaleY = zeroFretNoteHeight; // Use the correct height for open notes
+                    scaleY = zeroFretNoteHeight;
                 }
                 else
                 {
-                    // Fretted note: use standard positioning and scale
                     noteX = GetFretX(note.fretNumber);
                     scaleX = noteScaleX;
                     scaleY = noteScaleY;
                 }
 
-                // 2. NotePrefab Instantiation (using 3D coordinates)
                 Vector3 spawnPos = new Vector3(
-                    noteX,                          // X: calculated position
-                    GetStringY(note.stringNumber),  // Y: string lane
-                    spawnZ                          // Z: depth ("time until hit")
+                    noteX,
+                    GetStringY(note.stringNumber),
+                    spawnZ
                 );
                 var go = Instantiate(notePrefab, spawnPos, Quaternion.identity, transform);
                 go.name = $"Note_{note.time:F2}_{note.stringNumber}_{note.fretNumber}";
                 
-                // Apply scale
                 go.transform.localScale = new Vector3(scaleX, scaleY, noteScaleZ);
-
-                // Handle sustain
-                if (note.sustain > 0)
-                {
-                    float speed = (spawnZ - hitZ) / adjustedNoteTravelTime;
-                    float sustainLength = note.sustain * speed;
-                    go.transform.localScale = new Vector3(scaleX, scaleY, sustainLength);
-                    // Adjust position to account for the new scale, so the front of the note is at the spawn position
-                    go.transform.position += new Vector3(0, 0, sustainLength / 2f);
-                }
-
+                
                 note.noteObject = go;
                 note.isSpawned = true;
-                note.previousZPos = spawnZ; // Initialize previous position on spawn
+                note.previousZPos = spawnZ;
 
-                // Set Note Material based on string
                 var renderer = go.GetComponent<Renderer>();
                 if (renderer != null)
                 {
-                    if (note.palmMute && palmMuteMaterial != null)
-                    {
-                        renderer.material = palmMuteMaterial;
-                    }
-                    else if (note.mute && muteMaterial != null)
-                    {
-                        renderer.material = muteMaterial;
-                    }
-                    else if (note.accent && accentMaterial != null)
-                    {
-                        renderer.material = accentMaterial;
-                    }
-                    else if (note.hammerOn && hammerOnMaterial != null)
-                    {
-                        renderer.material = hammerOnMaterial;
-                    }
-                    else if (note.pullOff && pullOffMaterial != null)
-                    {
-                        renderer.material = pullOffMaterial;
-                    }
-                    else if (note.slideTo != -1 && slideMaterial != null)
-                    {
-                        renderer.material = slideMaterial;
-                    }
-                    else if (stringMaterials != null && note.stringNumber < stringMaterials.Length)
-                    {
-                        renderer.material = stringMaterials[note.stringNumber];
-                    }
+                    if (note.palmMute && palmMuteMaterial != null) renderer.material = palmMuteMaterial;
+                    else if (note.mute && muteMaterial != null) renderer.material = muteMaterial;
+                    else if (note.accent && accentMaterial != null) renderer.material = accentMaterial;
+                    else if (note.hammerOn && hammerOnMaterial != null) renderer.material = hammerOnMaterial;
+                    else if (note.pullOff && pullOffMaterial != null) renderer.material = pullOffMaterial;
+                    else if (note.slideTo != -1 && slideMaterial != null) renderer.material = slideMaterial;
+                    else if (stringMaterials != null && note.stringNumber < stringMaterials.Length) renderer.material = stringMaterials[note.stringNumber];
                 }
 
-                // Show Fret Numbers (Option 1: Text Label)
                 if (fretLabelPrefab != null)
                 {
-                    // Calculate the fixed Y position for the label (below the lowest string)
-                    // totalStrings - 1 is the index of the lowest string
                     float fixedLabelY = GetStringY(totalStrings - 1) + fretLabelYOffset;
-                    
-                    Vector3 labelPos = new Vector3(
-                        spawnPos.x + fretLabelXOffset, // Apply the new X offset
-                        fixedLabelY,                   // Use the fixed Y position
-                        spawnZ
-                    );
-
-                    // Instantiate the label and parent it to the NoteHighway transform (this.transform)
-                    // so it moves along Z with the note but stays at a constant Y.
+                    Vector3 labelPos = new Vector3(spawnPos.x + fretLabelXOffset, fixedLabelY, spawnZ);
                     var labelGO = Instantiate(fretLabelPrefab, labelPos, Quaternion.identity, transform);
                     labelGO.name = $"FretLabel_{note.fretNumber}_{note.stringNumber}";
-                    
-                    // Store the label object in the NoteData so it can be destroyed later
                     note.fretLabelObject = labelGO;
 
-                    // Find the TextMeshPro component on the label prefab
                     var labelText = labelGO.GetComponent<TextMeshPro>();
                     if (labelText != null)
                     {
-                        // Apply the desired rotation to the TextMeshPro component's transform
                         labelText.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
-                        
                         labelText.text = note.fretNumber.ToString();
-                        labelText.fontSize = fretLabelFontSize; // Apply font size
+                        labelText.fontSize = fretLabelFontSize;
                     }
                     else
                     {
-                        // Apply the rotation to the root object if no TextMeshPro component is found
                         labelGO.transform.localRotation = Quaternion.Euler(fretLabelRotationX, 0, 0);
                         Debug.LogWarning("Fret Label Prefab does not contain a TextMeshPro component.");
                     }
                 }
             }
 
-            // 2. Movement and Despawning Logic: Only for spawned notes
+            // 2. Movement and Despawning Logic:
             if (note.noteObject != null)
             {
                 float timeSinceSpawn = t - startTime;
-                
-                // Progress from spawnZ (0) to effectiveDespawnZ (1)
                 float totalProgress = Mathf.Clamp01(timeSinceSpawn / totalTravelTime);
-                
                 float zPos = Mathf.Lerp(spawnZ, effectiveDespawnZ, totalProgress);
                 
-                // To fix Y-level drift, recalculate the correct Y position every frame.
                 float correctY = GetStringY(note.stringNumber);
                 note.noteObject.transform.position = new Vector3(note.noteObject.transform.position.x, correctY, zPos);
 
-                // Move the associated fret label along the Z-axis
                 if (note.fretLabelObject != null)
                 {
-                    // Keep the label's X and Y fixed, only update Z
                     Vector3 labelPos = note.fretLabelObject.transform.position;
                     note.fretLabelObject.transform.position = new Vector3(labelPos.x, labelPos.y, zPos);
                 }
 
-                // Hit Marker Spawning Logic based on crossing the hit line
                 if (note.previousZPos > hitZ && zPos <= hitZ && !note.hitMarkerSpawned)
                 {
-                    // To guarantee perfect alignment, calculate the exact position for the hit marker
                     Vector3 hitPosition = new Vector3(
-                        note.noteObject.transform.position.x, // X position is correct
-                        GetStringY(note.stringNumber),        // Explicitly set the correct Y
-                        hitZ                                  // Explicitly set the correct Z
+                        note.noteObject.transform.position.x,
+                        GetStringY(note.stringNumber),
+                        hitZ
                     );
 
-                    // Spawn the hit marker at the calculated perfect position
                     GameObject hitMarker = Instantiate(note.noteObject, hitPosition, Quaternion.identity, transform);
                     hitMarker.name = $"HitMarker_{note.time:F2}_{note.stringNumber}_{note.fretNumber}";
-                    hitMarker.transform.localScale *= 1.2f; // Apply scale pop
+                    hitMarker.transform.localScale *= 1.2f;
 
                     Renderer hitMarkerRenderer = hitMarker.GetComponent<Renderer>();
                     if (hitMarkerRenderer != null && hitMarkerMaterials != null && note.stringNumber < hitMarkerMaterials.Length)
@@ -378,70 +453,74 @@ public class NoteHighway : MonoBehaviour
                     }
 
                     hitMarker.AddComponent<HitMarkerFader>().fadeTime = hitMarkerFadeTime;
-
-                    // The original note has served its purpose. Hide it and destroy it.
-                    note.noteObject.SetActive(false);
+                    
                     Destroy(note.noteObject);
-                    note.noteObject = null; // Important to prevent further processing
-                    note.isSpawned = false; // Reset state for rewind
-                    note.hitMarkerSpawned = true; // Mark as hit for this pass
+                    note.noteObject = null;
+                    note.isSpawned = false;
+                    note.hitMarkerSpawned = true;
 
-                    // Destroy the fret label object as well
                     if (note.fretLabelObject != null)
                     {
                         Destroy(note.fretLabelObject);
                         note.fretLabelObject = null;
                     }
                 }
-                // If the note has passed the despawn point (and wasn't destroyed by the hit marker logic)
                 else if (!devNotePositioningMode && timeSinceSpawn >= totalTravelTime)
                 {
                     Destroy(note.noteObject);
                     note.noteObject = null;
-                    note.isSpawned = false; // Reset state for rewind
+                    note.isSpawned = false;
 
-                    // Destroy the fret label object as well
                     if (note.fretLabelObject != null)
                     {
                         Destroy(note.fretLabelObject);
                         note.fretLabelObject = null;
                     }
                 }
-
-                // Update the previous position for the next frame's check
                 note.previousZPos = zPos;
             }
         }
     }
 
-    public void ResetNotes()
+    public void UpdateHighwayPosition()
     {
-        if (notes == null) return;
+        // This method is called by Main.cs when the user scrubs or jumps while paused.
+        // It forces a single update pass to reposition all notes and markers.
+        Update();
+    }
 
-        foreach (var note in notes)
+    public void ResetHighway()
+    {
+        // Reset notes
+        if (notes != null)
         {
-            if (note.noteObject != null)
+            foreach (var note in notes)
             {
-                Destroy(note.noteObject);
-                note.noteObject = null;
+                if (note.noteObject != null) Destroy(note.noteObject);
+                if (note.fretLabelObject != null) Destroy(note.fretLabelObject);
+                note.isSpawned = false;
+                note.hitMarkerSpawned = false;
+                note.previousZPos = -1f;
             }
-            if (note.fretLabelObject != null)
-            {
-                Destroy(note.fretLabelObject);
-                note.fretLabelObject = null;
-            }
-            note.isSpawned = false;
-            note.hitMarkerSpawned = false;
-            note.previousZPos = -1f; // Reset previous position
+            notes = null; // Stop processing old notes
         }
 
-        // Crucial: Set notes to null so the Update loop stops processing immediately
-        notes = null;
+        // Reset bar markers
+        if (barMarkers != null)
+        {
+            foreach (var bar in barMarkers)
+            {
+                if (bar.markerObject != null) Destroy(bar.markerObject);
+                if (bar.labelObject != null) Destroy(bar.labelObject);
+                if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
+            }
+            barMarkers.Clear(); // Clear the list
+        }
     }
+
 
     private void CreateFretboardStrings()
     {
-        // Check if we have materials and string count set up
         if (stringMaterials == null || stringMaterials.Length == 0 || totalStrings <= 0)
         {
             Debug.LogWarning("Cannot create fretboard strings: stringMaterials is null/empty or totalStrings is zero.");
@@ -450,148 +529,73 @@ public class NoteHighway : MonoBehaviour
 
         for (int i = 0; i < totalStrings; i++)
         {
-            // 1. Create the string object (using a simple cube primitive)
             GameObject stringObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             stringObject.name = $"FretboardString_{i}";
-            stringObject.transform.SetParent(transform); // Parent to NoteHighway for organization
+            stringObject.transform.SetParent(transform);
 
-            // 2. Positioning
             float stringY = GetStringY(i) + fretboardYOffset;
-            // X is centered (0)
-            stringObject.transform.position = new Vector3(
-                0f, // Centered on X
-                stringY,
-                hitZ // Positioned at the hit line
-            );
+            stringObject.transform.position = new Vector3(0f, stringY, hitZ);
+            stringObject.transform.localScale = new Vector3(stringWidth, stringHeight, stringDepth);
 
-            // 3. Scaling
-            stringObject.transform.localScale = new Vector3(
-                stringWidth, // X width
-                stringHeight, // Y height
-                stringDepth // Z depth
-            );
-
-            // 4. Material
             if (i < stringMaterials.Length)
             {
                 Renderer renderer = stringObject.GetComponent<Renderer>();
-                if (renderer != null)
-                {
-                    renderer.material = stringMaterials[i];
-                }
+                if (renderer != null) renderer.material = stringMaterials[i];
             }
             
-            // Optional: Disable colliders if they are not needed
             Collider collider = stringObject.GetComponent<Collider>();
-            if (collider != null)
-            {
-                collider.enabled = false;
-            }
+            if (collider != null) collider.enabled = false;
         }
     }
 
     private void CreateFretboardVisuals()
     {
-        // Calculate the total height of the fretboard visuals
-        // String 0 is at GetStringY(0), last string is at GetStringY(totalStrings - 1)
-        float padding = 10.0f; // 5 units above and 5 units below
-        float totalHeight = GetStringY(0) - GetStringY(totalStrings - 1) + stringHeight + padding; // Add string height and padding for full coverage
-        float verticalCenterY = GetStringY(totalStrings - 1) + (totalHeight / 2f) - (stringHeight / 2f) - (padding / 2f); // Adjust center to account for padding
+        float padding = 10.0f;
+        float totalHeight = GetStringY(0) - GetStringY(totalStrings - 1) + stringHeight + padding;
+        float verticalCenterY = GetStringY(totalStrings - 1) + (totalHeight / 2f) - (stringHeight / 2f) - (padding / 2f);
 
-        // 1. Create Fret Lines
-        // Start at fret 1 to skip the zero fret (the nut)
         for (int fret = 1; fret <= maxFretNumber; fret++)
         {
-            // Create the line object (using a simple cube primitive)
             GameObject fretLine = GameObject.CreatePrimitive(PrimitiveType.Cube);
             fretLine.name = $"FretLine_{fret}";
             fretLine.transform.SetParent(transform);
 
-            // Positioning: X at the fret position, Y centered, Z at hitZ
-            // Shift the fret line back by half a fret space to act as the boundary before the note's center
-            fretLine.transform.position = new Vector3(
-                GetFretX(fret) - (fretSpacing / 2f),
-                verticalCenterY,
-                hitZ
-            );
+            fretLine.transform.position = new Vector3(GetFretX(fret) - (fretSpacing / 2f), verticalCenterY, hitZ);
+            fretLine.transform.localScale = new Vector3(fretLineThickness, totalHeight, fretLineDepth);
 
-            // Scaling: X is thickness, Y is total height, Z is depth
-            fretLine.transform.localScale = new Vector3(
-                fretLineThickness,
-                totalHeight,
-                fretLineDepth
-            );
-
-            // Material
             Renderer renderer = fretLine.GetComponent<Renderer>();
-            if (renderer != null && fretLineMaterial != null)
-            {
-                renderer.material = fretLineMaterial;
-            }
+            if (renderer != null && fretLineMaterial != null) renderer.material = fretLineMaterial;
 
-            // Disable collider
             Collider collider = fretLine.GetComponent<Collider>();
-            if (collider != null)
-            {
-                collider.enabled = false;
-            }
+            if (collider != null) collider.enabled = false;
         }
 
-        // 2. Create Inlay Dots
         if (inlayDotMaterial != null)
         {
             foreach (int fret in inlayFrets)
             {
                 if (fret > 0 && fret <= maxFretNumber)
                 {
-                    // Special case for 12th fret (double dot)
                     int dotCount = (fret == 12) ? 2 : 1;
-                    
-                    // The dot should be centered on the fret space, which is where the notes are.
-                    float fretCenterX = GetFretX(fret); // Use the note's center position
+                    float fretCenterX = GetFretX(fret);
 
                     for (int i = 0; i < dotCount; i++)
                     {
-                        // Create the dot object (using a simple cube primitive for a flat, disc-like appearance)
                         GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Cube);
                         dot.name = $"InlayDot_{fret}_{i}";
                         dot.transform.SetParent(transform);
 
-                        // Vertical offset for double dot at 12th fret
                         float dotOffsetY = 0f;
-                        if (dotCount == 2)
-                        {
-                            // Place dots slightly above and below the center line
-                            dotOffsetY = (i == 0) ? doubleDotOffset : -doubleDotOffset;
-                        }
+                        if (dotCount == 2) dotOffsetY = (i == 0) ? doubleDotOffset : -doubleDotOffset;
 
-                        // Positioning: X at fret center, Y at vertical center (with offset), Z at hitZ
-                        dot.transform.position = new Vector3(
-                            fretCenterX,
-                            verticalCenterY + dotOffsetY,
-                            hitZ
-                        );
+                        dot.transform.position = new Vector3(fretCenterX, verticalCenterY + dotOffsetY, hitZ);
+                        dot.transform.localScale = new Vector3(inlayDotScale, inlayDotScale, fretLineDepth * 2f);
 
-                        // Scaling: Make it a flat disc/square
-                        dot.transform.localScale = new Vector3(
-                            inlayDotScale,
-                            inlayDotScale,
-                            fretLineDepth * 2f // Give it a small depth so it's visible in 3D
-                        );
-
-                        // Material
                         Renderer renderer = dot.GetComponent<Renderer>();
-                        if (renderer != null)
-                        {
-                            renderer.material = inlayDotMaterial;
-                        }
+                        if (renderer != null) renderer.material = inlayDotMaterial;
 
-                        // Disable collider
                         Collider collider = dot.GetComponent<Collider>();
-                        if (collider != null)
-                        {
-                            collider.enabled = false;
-                        }
+                        if (collider != null) collider.enabled = false;
                     }
                 }
             }
