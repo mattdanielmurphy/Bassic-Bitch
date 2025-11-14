@@ -216,7 +216,8 @@ public class NoteHighway : MonoBehaviour
         float timeToDespawn = (hitZ - effectiveDespawnZ) / speed;
         float totalTravelTime = adjustedNoteTravelTime + timeToDespawn;
 
-        // Apply the video offset (converted to seconds) to the bar markers
+        // Calculate the video offset (converted to seconds) once for both notes and bar markers.
+        // The offset is inverted to match the user's desired behavior.
         float offsetSeconds = -videoOffsetMs / 1000f;
 
         // --- NEW Bar Marker Spawning and Movement Logic ---
@@ -325,7 +326,6 @@ public class NoteHighway : MonoBehaviour
         foreach (var note in notes) {
             // Apply the video offset (converted to seconds) to the note's time
             // The offset is inverted to match the user's desired behavior.
-            float offsetSeconds = -videoOffsetMs / 1000f;
             // Adjust note.time based on the current song speed percentage
             float adjustedNoteTime = note.time / (psarcLoader.currentSongSpeedPercentage / 100f);
             float startTime = adjustedNoteTime - adjustedNoteTravelTime - offsetSeconds;
