@@ -2,18 +2,18 @@ using System.Collections.Generic;
 using System.Xml.Linq;
 using System.Linq;
 using UnityEngine;
+using System.Globalization;
 
 public static class ArrangementParser
 {
     /// <summary>
-    /// Parses a Rocksmith arrangement XML file and extracts notes and bar timings.
+    /// Parses a Rocksmith arrangement XML file using a difficulty-override strategy to get the final note chart.
     /// </summary>
     /// <param name="arrangementXmlPath">The absolute path to the arrangement XML file.</param>
-    /// <returns>An ArrangementData object containing notes and bar times.</returns>
+    /// <returns>An ArrangementData object containing the final list of notes and bar times.</returns>
     public static ArrangementData ParseArrangement(string arrangementXmlPath)
     {
-        ArrangementData data = new ArrangementData();
-
+        var data = new ArrangementData();
         if (!System.IO.File.Exists(arrangementXmlPath))
         {
             Debug.LogError($"Arrangement XML file not found: {arrangementXmlPath}");
@@ -22,117 +22,92 @@ public static class ArrangementParser
 
         try
         {
-            // XDocument.Load is used to parse the XML file
             XDocument doc = XDocument.Load(arrangementXmlPath);
 
-            // 1. Parse Notes
-            // Collect all notes across every level, merging and deduplicating them.
-            var allLevels = doc.Descendants("level")
-                .Where(l => l.Attribute("difficulty") != null);
+            // --- 1. Pre-parse Chord Templates ---
+            var chordTemplates = doc.Descendants("chordTemplate")
+                .Select(ct => new
+                {
+                    fret0 = int.Parse(ct.Attribute("fret0").Value),
+                    fret1 = int.Parse(ct.Attribute("fret1").Value),
+                    fret2 = int.Parse(ct.Attribute("fret2").Value),
+                    fret3 = int.Parse(ct.Attribute("fret3").Value),
+                    fret4 = int.Parse(ct.Attribute("fret4").Value),
+                    fret5 = int.Parse(ct.Attribute("fret5").Value),
+                }).ToList();
+            
+            Debug.Log($"Parsed {chordTemplates.Count} chord templates.");
 
-            if (!allLevels.Any())
+            // --- 2. Collect All Events and Apply Override Logic ---
+            var eventsByTime = new Dictionary<float, (int difficulty, XElement element)>();
+            
+            var levels = doc.Descendants("level")
+                .Where(l => l.Attribute("difficulty") != null)
+                .OrderBy(l => int.Parse(l.Attribute("difficulty").Value));
+
+            if (!levels.Any())
             {
                 Debug.LogWarning("No difficulty levels found in the arrangement XML.");
-                // Continue to parse bar times even if no notes are found
             }
 
-            Dictionary<string, NoteData> noteDict = new Dictionary<string, NoteData>();
-
-            foreach (var level in allLevels)
+            foreach (var level in levels)
             {
-                // Find all <note> and <chordNote> elements within the current difficulty level
-                var noteElements = level.Descendants("note").Concat(level.Descendants("chordNote"));
-
-                foreach (var noteElement in noteElements)
+                int difficulty = int.Parse(level.Attribute("difficulty").Value);
+                
+                foreach (var noteElement in level.Descendants("note"))
                 {
-                    // Extract attributes, converting them to the correct type
-                    float time = 0f;
-                    int fret = 0;
-                    int stringIndex = 0;
+                    float time = float.Parse(noteElement.Attribute("time").Value, CultureInfo.InvariantCulture);
+                    eventsByTime[time] = (difficulty, noteElement);
+                }
 
-                    // Attempt to parse all required attributes
-                    var timeAttr = noteElement.Attribute("time");
-                    var fretAttr = noteElement.Attribute("fret");
-                    var stringAttr = noteElement.Attribute("string");
+                foreach (var chordElement in level.Descendants("chord"))
+                {
+                    float time = float.Parse(chordElement.Attribute("time").Value, CultureInfo.InvariantCulture);
+                    eventsByTime[time] = (difficulty, chordElement);
+                }
+            }
 
-                    if (timeAttr != null && float.TryParse(timeAttr.Value, out time) &&
-                        fretAttr != null && int.TryParse(fretAttr.Value, out fret) &&
-                        stringAttr != null && int.TryParse(stringAttr.Value, out stringIndex))
+            Debug.Log($"Collected {eventsByTime.Count} unique timed events after difficulty override.");
+            
+            // --- 3. Process the Final "Winning" Events into NoteData ---
+            foreach (var kvp in eventsByTime)
+            {
+                var element = kvp.Value.element;
+
+                if (element.Name == "note")
+                {
+                    data.Notes.Add(ParseNoteData(element));
+                }
+                else if (element.Name == "chord")
+                {
+                    int chordId = int.Parse(element.Attribute("chordId").Value);
+                    if (chordId < chordTemplates.Count)
                     {
-                        // Create a unique key based on time, string, fret for deduplication
-                        string key = $"{time}-{stringIndex}-{fret}";
-                        if (noteDict.ContainsKey(key))
+                        var template = chordTemplates[chordId];
+                        var frets = new[] { template.fret0, template.fret1, template.fret2, template.fret3, template.fret4, template.fret5 };
+
+                        for (int i = 0; i < frets.Length; i++)
                         {
-                            // Skip if already added
-                            continue;
+                            if (frets[i] != -1)
+                            {
+                                data.Notes.Add(ParseNoteData(element, i, frets[i]));
+                            }
                         }
-
-                        var sustainAttr = noteElement.Attribute("sustain");
-                        var palmMuteAttr = noteElement.Attribute("palmMute");
-                        var muteAttr = noteElement.Attribute("mute");
-                        var accentAttr = noteElement.Attribute("accent");
-                        var slideToAttr = noteElement.Attribute("slideTo");
-                        var hammerOnAttr = noteElement.Attribute("hammerOn");
-                        var pullOffAttr = noteElement.Attribute("pullOff");
-
-                        float sustain = 0f;
-                        if (sustainAttr != null) float.TryParse(sustainAttr.Value, out sustain);
-
-                        int palmMute = 0;
-                        if (palmMuteAttr != null) int.TryParse(palmMuteAttr.Value, out palmMute);
-
-                        int mute = 0;
-                        if (muteAttr != null) int.TryParse(muteAttr.Value, out mute);
-
-                        int accent = 0;
-                        if (accentAttr != null) int.TryParse(accentAttr.Value, out accent);
-
-                        int slideTo = -1;
-                        if (slideToAttr != null) int.TryParse(slideToAttr.Value, out slideTo);
-
-                        int hammerOn = 0;
-                        if (hammerOnAttr != null) int.TryParse(hammerOnAttr.Value, out hammerOn);
-
-                        int pullOff = 0;
-                        if (pullOffAttr != null) int.TryParse(pullOffAttr.Value, out pullOff);
-
-                        noteDict.Add(key, new NoteData
-                        {
-                            time = time,
-                            fretNumber = fret,
-                            stringNumber = stringIndex,
-                            sustain = sustain,
-                            palmMute = palmMute == 1,
-                            mute = mute == 1,
-                            accent = accent == 1,
-                            slideTo = slideTo,
-                            hammerOn = hammerOn == 1,
-                            pullOff = pullOff == 1
-                        });
-                    }
-                    else
-                    {
-                        // Log a warning if a note element is malformed, but continue parsing
-                        Debug.LogWarning($"Skipping malformed note element in XML: {noteElement}");
                     }
                 }
             }
 
-            data.Notes = noteDict.Values.ToList();
-            Debug.Log($"Successfully parsed {data.Notes.Count} unique notes from all difficulty levels in arrangement XML.");
-
-            // 2. Parse Bar Times from <ebeats>
+            // --- 4. Parse Bar Times (ebeats) ---
             var ebeats = doc.Descendants("ebeat");
             foreach (var ebeat in ebeats)
             {
                 var timeAttr = ebeat.Attribute("time");
                 var measureAttr = ebeat.Attribute("measure");
 
-                if (timeAttr != null && float.TryParse(timeAttr.Value, out float time) &&
+                // CORRECTED LINE: The TryParse overload needs NumberStyles specified.
+                if (timeAttr != null && float.TryParse(timeAttr.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float time) &&
                     measureAttr != null && int.TryParse(measureAttr.Value, out int measure))
                 {
-                    // Only add beats that mark the start of a new measure (measure > 0)
-                    // In Rocksmith XML, measure=1 is the first bar, measure=-1 is an intermediate beat.
                     if (measure > 0)
                     {
                         data.BarTimes.Add(time);
@@ -140,7 +115,10 @@ public static class ArrangementParser
                 }
             }
             
-            Debug.Log($"Successfully parsed {data.BarTimes.Count} bar times from arrangement XML.");
+            data.Notes = data.Notes.OrderBy(n => n.time).ToList();
+
+            Debug.Log($"Successfully parsed {data.Notes.Count} final notes (including chord notes).");
+            Debug.Log($"Successfully parsed {data.BarTimes.Count} bar times.");
         }
         catch (System.Exception e)
         {
@@ -148,5 +126,39 @@ public static class ArrangementParser
         }
 
         return data;
+    }
+    
+    private static NoteData ParseNoteData(XElement noteElement)
+    {
+        return new NoteData
+        {
+            time = float.Parse(noteElement.Attribute("time").Value, CultureInfo.InvariantCulture),
+            fretNumber = int.Parse(noteElement.Attribute("fret").Value),
+            stringNumber = int.Parse(noteElement.Attribute("string").Value),
+            sustain = float.Parse(noteElement.Attribute("sustain")?.Value ?? "0", CultureInfo.InvariantCulture),
+            palmMute = (int.Parse(noteElement.Attribute("palmMute")?.Value ?? "0")) == 1,
+            mute = (int.Parse(noteElement.Attribute("mute")?.Value ?? "0")) == 1,
+            accent = (int.Parse(noteElement.Attribute("accent")?.Value ?? "0")) == 1,
+            slideTo = int.Parse(noteElement.Attribute("slideTo")?.Value ?? "-1"),
+            hammerOn = (int.Parse(noteElement.Attribute("hammerOn")?.Value ?? "0")) == 1,
+            pullOff = (int.Parse(noteElement.Attribute("pullOff")?.Value ?? "0")) == 1
+        };
+    }
+    
+    private static NoteData ParseNoteData(XElement chordElement, int stringIndex, int fret)
+    {
+        return new NoteData
+        {
+            time = float.Parse(chordElement.Attribute("time").Value, CultureInfo.InvariantCulture),
+            fretNumber = fret,
+            stringNumber = stringIndex,
+            sustain = float.Parse(chordElement.Attribute("sustain")?.Value ?? "0", CultureInfo.InvariantCulture),
+            palmMute = (int.Parse(chordElement.Attribute("palmMute")?.Value ?? "0")) == 1,
+            mute = (int.Parse(chordElement.Attribute("mute")?.Value ?? "0")) == 1,
+            accent = (int.Parse(chordElement.Attribute("accent")?.Value ?? "0")) == 1,
+            slideTo = -1,
+            hammerOn = (int.Parse(chordElement.Attribute("hopo")?.Value ?? "0")) == 1,
+            pullOff = (int.Parse(chordElement.Attribute("hopo")?.Value ?? "0")) == 1
+        };
     }
 }

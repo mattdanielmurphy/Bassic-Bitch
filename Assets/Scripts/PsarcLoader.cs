@@ -136,6 +136,7 @@ public class PsarcLoader : MonoBehaviour
 
     void Start()
     {
+        noteHighway = FindObjectOfType<NoteHighway>();
         if (main == null)
         {
             main = FindObjectOfType<Main>();

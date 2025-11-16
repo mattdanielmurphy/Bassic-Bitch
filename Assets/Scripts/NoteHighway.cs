@@ -54,6 +54,7 @@ public class NoteHighway : MonoBehaviour
     public float stringWidth = 80f;
     public float stringHeight = 0.3f;
     public float stringDepth = 1f;
+    public float fretboardXOffset = 50.0f;
 
     [Header("Fretboard Visuals")]
     public Material fretLineMaterial;
@@ -93,7 +94,6 @@ public class NoteHighway : MonoBehaviour
         // The width is calculated from the center of fret 0 to the center of maxFretNumber.
         fretboardBarLineTotalWidth = maxFretNumber * fretSpacing;
 
-        // Do NOT log warnings about notes/audioSource here!
         CreateFretboardStrings();
         CreateFretboardVisuals();
         CreateFretboardLinesZ(); // New call to create lines extending down the highway
@@ -311,10 +311,14 @@ public class NoteHighway : MonoBehaviour
 
                     if (timeSinceSpawn >= totalTravelTime)
                     {
-                        if (bar.markerObject != null) Destroy(bar.markerObject);
-                        if (bar.labelObject != null) Destroy(bar.labelObject);
-                        if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
-                        bar.isSpawned = false;
+                        // Only despawn if the song is actually playing
+                        if (audioSource.isPlaying)
+                        {
+                            if (bar.markerObject != null) Destroy(bar.markerObject);
+                            if (bar.labelObject != null) Destroy(bar.labelObject);
+                            if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
+                            bar.isSpawned = false;
+                        }
                     }
                 }
             }
@@ -467,14 +471,18 @@ public class NoteHighway : MonoBehaviour
                 }
                 else if (!devNotePositioningMode && timeSinceSpawn >= totalTravelTime)
                 {
-                    Destroy(note.noteObject);
-                    note.noteObject = null;
-                    note.isSpawned = false;
-
-                    if (note.fretLabelObject != null)
+                    // Only despawn if the song is actually playing
+                    if (audioSource.isPlaying)
                     {
-                        Destroy(note.fretLabelObject);
-                        note.fretLabelObject = null;
+                        Destroy(note.noteObject);
+                        note.noteObject = null;
+                        note.isSpawned = false;
+
+                        if (note.fretLabelObject != null)
+                        {
+                            Destroy(note.fretLabelObject);
+                            note.fretLabelObject = null;
+                        }
                     }
                 }
                 note.previousZPos = zPos;
@@ -491,13 +499,28 @@ public class NoteHighway : MonoBehaviour
 
     public void ResetHighway()
     {
-        // Reset notes
+        // Selectively destroy only the dynamic elements (notes, bars, labels, etc.)
+        foreach (Transform child in transform)
+        {
+            string childName = child.name;
+            if (childName.StartsWith("Note_") || 
+                childName.StartsWith("FretLabel_") || 
+                childName.StartsWith("BarMarkerLine_") || 
+                childName.StartsWith("LeftBarMarkerLine_") || 
+                childName.StartsWith("BarLabel_") || 
+                childName.StartsWith("HitMarker_"))
+            {
+                GameObject.Destroy(child.gameObject);
+            }
+        }
+
+        // Reset notes data
         if (notes != null)
         {
             foreach (var note in notes)
             {
-                if (note.noteObject != null) Destroy(note.noteObject);
-                if (note.fretLabelObject != null) Destroy(note.fretLabelObject);
+                note.noteObject = null;
+                note.fretLabelObject = null;
                 note.isSpawned = false;
                 note.hitMarkerSpawned = false;
                 note.previousZPos = -1f;
@@ -505,15 +528,9 @@ public class NoteHighway : MonoBehaviour
             notes = null; // Stop processing old notes
         }
 
-        // Reset bar markers
+        // Reset bar markers data
         if (barMarkers != null)
         {
-            foreach (var bar in barMarkers)
-            {
-                if (bar.markerObject != null) Destroy(bar.markerObject);
-                if (bar.labelObject != null) Destroy(bar.labelObject);
-                if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
-            }
             barMarkers.Clear(); // Clear the list
         }
     }
@@ -534,7 +551,7 @@ public class NoteHighway : MonoBehaviour
             stringObject.transform.SetParent(transform);
 
             float stringY = GetStringY(i) + fretboardYOffset;
-            stringObject.transform.position = new Vector3(0f, stringY, hitZ);
+            stringObject.transform.position = new Vector3(fretboardXOffset, stringY, hitZ);
             stringObject.transform.localScale = new Vector3(stringWidth, stringHeight, stringDepth);
 
             if (i < stringMaterials.Length)
@@ -601,4 +618,5 @@ public class NoteHighway : MonoBehaviour
             }
         }
     }
+
 }

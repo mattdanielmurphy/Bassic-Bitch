@@ -19,10 +19,13 @@ public class Main : MonoBehaviour
     public Button applySpeedButton; // Button to apply the pending speed change
     public TextMeshProUGUI loadingText; // Reference to the loading text UI element
 
+    public bool runInBackground = true; // Option to keep the game running when focus is lost
+
     private bool isPlaying = false;
     private float _initialVideoOffsetMs = 0f; // Store the default value from NoteHighway.cs on startup
     private float _appliedSongSpeed = 100f; // Store the currently applied song speed
     private bool isUpdatingScrubberFromCode = false; // Flag to prevent feedback loop
+    private bool isUpdatingSongSpeedFromCode = false; // Flag to prevent feedback loop for song speed slider
 
     public void SetLoadingText(bool isLoading)
     {
@@ -34,6 +37,9 @@ public class Main : MonoBehaviour
 
     void Start()
     {
+        // Set application behavior based on user option
+        Application.runInBackground = runInBackground;
+
         playPauseButton.onClick.AddListener(TogglePlayPause);
         muteButton.onClick.AddListener(ToggleMute);
         playbackScrubber.onValueChanged.AddListener(OnScrubberValueChanged);
@@ -57,6 +63,7 @@ public class Main : MonoBehaviour
         {
             songSpeedSlider.minValue = 50f;
             songSpeedSlider.maxValue = 150f;
+            songSpeedSlider.wholeNumbers = true; // Ensure 1% steps by default
             _appliedSongSpeed = 100f; // Initialize applied speed
             songSpeedSlider.value = _appliedSongSpeed;
             songSpeedSlider.onValueChanged.AddListener(OnSongSpeedValueChanged);
@@ -79,6 +86,13 @@ public class Main : MonoBehaviour
 
     void Update()
     {
+        // Check if playback has stopped naturally (e.g., reached end of song)
+        if (psarcLoader?.audioSource?.clip != null && isPlaying && !psarcLoader.audioSource.isPlaying)
+        {
+            isPlaying = false;
+            UpdatePlayPauseButtonText();
+        }
+
         // Ensure a keyboard is present before checking for input
         if (Keyboard.current == null) return;
 
@@ -180,7 +194,8 @@ public class Main : MonoBehaviour
 
         if (psarcLoader?.audioSource?.clip == null) return;
 
-        psarcLoader.audioSource.time = value * psarcLoader.audioSource.clip.length;
+        float targetTime = value * psarcLoader.audioSource.clip.length;
+        psarcLoader.JumpToTime(targetTime);
     }
 
     void UpdatePlayPauseButtonText()
@@ -238,6 +253,30 @@ public class Main : MonoBehaviour
 
     void OnSongSpeedValueChanged(float value)
     {
+        if (isUpdatingSongSpeedFromCode) return;
+
+        float snappedValue = value;
+        // Check if the Option/Alt key is NOT pressed (Keyboard.current.leftAltKey.isPressed)
+        // If not pressed, snap to the nearest 5%
+        if (Keyboard.current != null && !Keyboard.current.leftAltKey.isPressed)
+        {
+            // Snap to nearest 5
+            snappedValue = Mathf.Round(value / 5f) * 5f;
+            
+            // Clamp the snapped value to the slider's min/max range
+            snappedValue = Mathf.Clamp(snappedValue, songSpeedSlider.minValue, songSpeedSlider.maxValue);
+
+            // If the snapped value is different from the current slider value, update the slider
+            if (Mathf.Abs(snappedValue - value) > 0.1f)
+            {
+                isUpdatingSongSpeedFromCode = true;
+                songSpeedSlider.value = snappedValue;
+                isUpdatingSongSpeedFromCode = false;
+                // Use the snapped value for the rest of the logic
+                value = snappedValue;
+            }
+        }
+
         UpdateSongSpeedLabel(value);
         
         // Show/hide the apply button if the slider value differs from the applied speed
