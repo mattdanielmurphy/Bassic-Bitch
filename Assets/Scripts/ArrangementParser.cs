@@ -112,6 +112,9 @@ public static class ArrangementParser
                     {
                         data.BarTimes.Add(time);
                     }
+                    
+                    // Add all ebeats as beat times
+                    data.BeatTimes.Add(time);
                 }
             }
             
@@ -119,6 +122,7 @@ public static class ArrangementParser
 
             Debug.Log($"Successfully parsed {data.Notes.Count} final notes (including chord notes).");
             Debug.Log($"Successfully parsed {data.BarTimes.Count} bar times.");
+            Debug.Log($"Successfully parsed {data.BeatTimes.Count} beat times.");
         }
         catch (System.Exception e)
         {

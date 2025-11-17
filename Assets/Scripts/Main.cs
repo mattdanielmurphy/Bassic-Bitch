@@ -19,6 +19,9 @@ public class Main : MonoBehaviour
     public Button applySpeedButton; // Button to apply the pending speed change
     public TextMeshProUGUI loadingText; // Reference to the loading text UI element
 
+    // Maximum size of the audio cache in megabytes (MB)
+    public int audioCacheLimitMB = 1024;
+
     public bool runInBackground = true; // Option to keep the game running when focus is lost
 
     private bool isPlaying = false;
@@ -26,6 +29,12 @@ public class Main : MonoBehaviour
     private float _appliedSongSpeed = 100f; // Store the currently applied song speed
     private bool isUpdatingScrubberFromCode = false; // Flag to prevent feedback loop
     private bool isUpdatingSongSpeedFromCode = false; // Flag to prevent feedback loop for song speed slider
+    private bool isUpdatingVideoOffsetFromCode = false; // Flag to prevent feedback loop for video offset slider
+
+    private float _barNavigationTimer = 0f;
+    private const float _barNavigationInitialDelay = 0.5f; // Delay before repeat starts
+    private const float _barNavigationRepeatRate = 0.1f; // Time between repeats
+    private int _barNavigationDirection = 0; // -1 for left, 1 for right, 0 for none
 
     public void SetLoadingText(bool isLoading)
     {
@@ -96,6 +105,23 @@ public class Main : MonoBehaviour
         // Ensure a keyboard is present before checking for input
         if (Keyboard.current == null) return;
 
+        // Mouse wheel scrolling using new Input System (no UnityEngine.Input in this project)
+        if (Mouse.current != null)
+        {
+            Vector2 mousePos = Mouse.current.position.ReadValue();
+            bool mouseInGameWindow = mousePos.x >= 0 && mousePos.x < Screen.width && mousePos.y >= 0 && mousePos.y < Screen.height;
+            if (Application.isFocused && mouseInGameWindow)
+            {
+                float scrollDelta = Mouse.current.scroll.ReadValue().y;
+                if (Mathf.Abs(scrollDelta) > 0.1f)
+                {
+                    // Scroll by 1 second (1.0f) per scroll unit. Negative delta for forward scroll.
+                    float timeJump = -scrollDelta * 1.0f;
+                    JumpByTime(timeJump);
+                }
+            }
+        }
+
         // Keyboard controls using the new Input System
         if (Keyboard.current.spaceKey.wasPressedThisFrame)
         {
@@ -107,14 +133,30 @@ public class Main : MonoBehaviour
             ToggleMute();
         }
 
+        // Handle initial press for bar navigation
         if (Keyboard.current.leftArrowKey.wasPressedThisFrame)
         {
+            _barNavigationDirection = -1;
+            _barNavigationTimer = Time.time + _barNavigationInitialDelay;
             NavigateByBar(-1);
         }
-
-        if (Keyboard.current.rightArrowKey.wasPressedThisFrame)
+        else if (Keyboard.current.rightArrowKey.wasPressedThisFrame)
         {
+            _barNavigationDirection = 1;
+            _barNavigationTimer = Time.time + _barNavigationInitialDelay;
             NavigateByBar(1);
+        }
+        // Stop repeating if neither key is pressed
+        else if (!Keyboard.current.leftArrowKey.isPressed && !Keyboard.current.rightArrowKey.isPressed)
+        {
+            _barNavigationDirection = 0;
+        }
+
+        // Handle repeat navigation if key is held
+        if (_barNavigationDirection != 0 && Time.time >= _barNavigationTimer)
+        {
+            NavigateByBar(_barNavigationDirection);
+            _barNavigationTimer = Time.time + _barNavigationRepeatRate;
         }
 
         if (psarcLoader?.audioSource?.clip != null && psarcLoader.audioSource.isPlaying)
@@ -126,10 +168,40 @@ public class Main : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Updates the song speed UI elements (slider and label) to reflect a new applied speed.
+    /// </summary>
+    /// <param name="speed">The new song speed percentage to display and track.</param>
+    public void UpdateSongSpeedUI(float speed)
+    {
+        if (songSpeedSlider != null)
+        {
+            // Clamp the speed to the slider's range just in case
+            float clampedSpeed = Mathf.Clamp(speed, songSpeedSlider.minValue, songSpeedSlider.maxValue);
+
+            isUpdatingSongSpeedFromCode = true;
+            songSpeedSlider.value = clampedSpeed;
+            isUpdatingSongSpeedFromCode = false;
+
+            _appliedSongSpeed = clampedSpeed; // Update the applied speed tracker
+            UpdateSongSpeedLabel(clampedSpeed);
+
+            // Ensure the apply button is hidden after setting the speed
+            if (applySpeedButton != null)
+            {
+                applySpeedButton.gameObject.SetActive(false);
+            }
+        }
+    }
+
     public void NewSong()
     {
         if (psarcLoader != null)
         {
+            // Reset state before starting the load process
+            isPlaying = false;
+            UpdatePlayPauseButtonText();
+
             psarcLoader.NewSong();
             
             // 1. Apply default video offset
@@ -139,25 +211,26 @@ public class Main : MonoBehaviour
                 noteHighway.videoOffsetMs = _initialVideoOffsetMs;
                 UpdateVideoOffsetLabel(_initialVideoOffsetMs); // Update label on song load
             }
+            
+            // The state update is now handled asynchronously in SongLoadedAndStarted()
+            // which is called by PsarcLoader after the song is loaded and playback starts.
+        }
+    }
 
-            // 2. Reset song speed
-            if (songSpeedSlider != null)
-            {
-                const float defaultSpeed = 100f;
-                songSpeedSlider.value = defaultSpeed;
-                _appliedSongSpeed = defaultSpeed; // Reset applied speed tracker
-                psarcLoader.SetSongSpeed(defaultSpeed);
-                UpdateSongSpeedLabel(defaultSpeed);
-                
-                // Ensure the apply button is hidden after reset
-                if (applySpeedButton != null)
-                {
-                    applySpeedButton.gameObject.SetActive(false);
-                }
-            }
-
-            // 3. Update play/pause button text based on actual playback state (fixes autoplay bug)
-            isPlaying = psarcLoader.audioSource != null && psarcLoader.audioSource.isPlaying;
+    /// <summary>
+    /// Called by PsarcLoader after a song has been successfully loaded and playback has started.
+    /// </summary>
+    public void SongLoadedAndStarted()
+    {
+        if (psarcLoader?.audioSource != null)
+        {
+            // Reset scrubber to 0 (start of song)
+            isUpdatingScrubberFromCode = true;
+            playbackScrubber.value = 0f;
+            isUpdatingScrubberFromCode = false;
+            
+            // Force the state to 'playing' since we just initiated playback
+            isPlaying = true;
             UpdatePlayPauseButtonText();
         }
     }
@@ -235,6 +308,30 @@ public class Main : MonoBehaviour
 
     void OnVideoOffsetValueChanged(float value)
     {
+        if (isUpdatingVideoOffsetFromCode) return;
+
+        float snappedValue = value;
+        // Check if the Option/Alt key is NOT pressed (Keyboard.current.leftAltKey.isPressed)
+        // If not pressed, snap to the nearest 5ms
+        if (Keyboard.current != null && !Keyboard.current.leftAltKey.isPressed)
+        {
+            // Snap to nearest 5
+            snappedValue = Mathf.Round(value / 5f) * 5f;
+            
+            // Clamp the snapped value to the slider's min/max range
+            snappedValue = Mathf.Clamp(snappedValue, videoOffsetSlider.minValue, videoOffsetSlider.maxValue);
+
+            // If the snapped value is different from the current slider value, update the slider
+            if (Mathf.Abs(snappedValue - value) > 0.1f)
+            {
+                isUpdatingVideoOffsetFromCode = true;
+                videoOffsetSlider.value = snappedValue;
+                isUpdatingVideoOffsetFromCode = false;
+                // Use the snapped value for the rest of the logic
+                value = snappedValue;
+            }
+        }
+
         if (noteHighway != null)
         {
             noteHighway.videoOffsetMs = value;
@@ -254,6 +351,12 @@ public class Main : MonoBehaviour
     void OnSongSpeedValueChanged(float value)
     {
         if (isUpdatingSongSpeedFromCode) return;
+
+        // Pause the song immediately upon adjustment
+        if (psarcLoader?.audioSource?.isPlaying == true)
+        {
+            TogglePlayPause();
+        }
 
         float snappedValue = value;
         // Check if the Option/Alt key is NOT pressed (Keyboard.current.leftAltKey.isPressed)
@@ -303,8 +406,17 @@ public class Main : MonoBehaviour
         if (psarcLoader != null)
         {
             float newSpeed = songSpeedSlider.value;
-            psarcLoader.SetSongSpeed(newSpeed);
+            float oldSpeed = _appliedSongSpeed; // Capture the current applied speed before updating
+            
+            psarcLoader.SetSongSpeed(newSpeed, oldSpeed);
             _appliedSongSpeed = newSpeed;
+
+            // Save the last played speed to the arrangement data
+            if (psarcLoader.ArrangementData != null)
+            {
+                psarcLoader.ArrangementData.LastPlayedSpeed = newSpeed;
+                psarcLoader.SaveSongSettings(psarcLoader.ArrangementData);
+            }
         }
 
         // Hide the button after applying the change
@@ -358,6 +470,18 @@ public class Main : MonoBehaviour
         float targetTime = barTimes[targetBarIndex];
 
         // Jump to the target time
+        psarcLoader.JumpToTime(targetTime);
+    }
+
+    void JumpByTime(float timeDelta)
+    {
+        if (psarcLoader?.audioSource?.clip == null) return;
+
+        float targetTime = psarcLoader.audioSource.time + timeDelta;
+        
+        // Clamp the target time
+        targetTime = Mathf.Clamp(targetTime, 0f, psarcLoader.audioSource.clip.length);
+
         psarcLoader.JumpToTime(targetTime);
     }
 }

@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using TMPro; // Assuming TextMeshPro is used for the fret number label
+using System.Linq;
 
 public class NoteHighway : MonoBehaviour
 {
@@ -20,6 +21,8 @@ public class NoteHighway : MonoBehaviour
     private List<float> barTimes;
     // New list to manage our dynamic bar markers
     private List<BarMarkerData> barMarkers = new List<BarMarkerData>();
+    // New list to manage our dynamic beat markers
+    private List<BarMarkerData> beatMarkers = new List<BarMarkerData>();
 
 
     [Header("Fret Label")]
@@ -82,6 +85,13 @@ public class NoteHighway : MonoBehaviour
     public float leftBarMarkerLineThickness = 0.5f; // Thickness of the new Y-axis line
     public float leftBarMarkerLineXOffset = -5.0f;  // X offset for the left bar marker line from the start of the horizontal bar line
 
+    [Header("Beat Marker Visuals")]
+    public float beatLineYPosition = -5.0f; // Y position for the horizontal beat line
+    public float beatLineThickness = 0.1f;  // Thickness of the beat line on the Y-axis
+    public float beatLineXOffset = 0.0f;    // Horizontal offset for the beat line
+    public Material beatLineMaterial;       // Optional: specific material for beat lines
+    public bool showBeatLines = true;       // Flag to enable/disable beat lines
+
     [Header("Inlay Dots")]
     public Material inlayDotMaterial;
     public float inlayDotScale = 1.0f;
@@ -100,22 +110,47 @@ public class NoteHighway : MonoBehaviour
     }
     
     /// <summary>
-    /// Receives bar times from PsarcLoader and populates the bar marker data.
+    /// Receives arrangement data from PsarcLoader and populates the note and bar marker data.
     /// </summary>
-    public void SetBarTimes(List<float> newBarTimes)
+    public void LoadArrangementData(ArrangementData data)
     {
-        this.barTimes = newBarTimes;
-        barMarkers.Clear(); // Clear any old data
-
-        if (this.barTimes == null) return;
+        // Notes are loaded directly by PsarcLoader, but we can use this to initialize our lists.
+        this.notes = data.Notes;
         
-        for (int i = 0; i < this.barTimes.Count; i++)
+        // Bar Markers
+        barMarkers.Clear();
+        if (data.BarTimes != null)
         {
-            barMarkers.Add(new BarMarkerData
+            for (int i = 0; i < data.BarTimes.Count; i++)
             {
-                time = this.barTimes[i],
-                barNumber = i + 1 // Bar numbers are 1-based
-            });
+                barMarkers.Add(new BarMarkerData
+                {
+                    time = data.BarTimes[i],
+                    barNumber = i + 1 // Bar numbers are 1-based
+                });
+            }
+        }
+
+        // Beat Markers
+        beatMarkers.Clear();
+        if (data.BeatTimes != null)
+        {
+            // Filter out bar times from beat times to avoid drawing two lines
+            var barTimeSet = new HashSet<float>(data.BarTimes);
+            
+            for (int i = 0; i < data.BeatTimes.Count; i++)
+            {
+                float beatTime = data.BeatTimes[i];
+                // Only add if it's NOT a bar time (which is already handled by barMarkers)
+                if (!barTimeSet.Contains(beatTime))
+                {
+                    beatMarkers.Add(new BarMarkerData
+                    {
+                        time = beatTime,
+                        barNumber = 0 // Beat markers don't need a bar number label
+                    });
+                }
+            }
         }
     }
 
@@ -193,6 +228,13 @@ public class NoteHighway : MonoBehaviour
     // DELETED: The old CreateBarMarkers() method is no longer needed.
 
     void Update() {
+        // If the PsarcLoader is in the middle of reloading the audio, freeze the highway completely
+        // to prevent it from reacting to the temporary state where audioSource.time is 0.
+        if (psarcLoader != null && psarcLoader.IsReloading)
+        {
+            return;
+        }
+
         if (audioSource == null)
         {
             // This is normal before a song is loaded.
@@ -231,11 +273,17 @@ public class NoteHighway : MonoBehaviour
                 // Rewind/Reset Logic
                 if (t < startTime && bar.isSpawned)
                 {
-                    if (bar.markerObject != null) Destroy(bar.markerObject);
-                    if (bar.labelObject != null) Destroy(bar.labelObject);
-                    if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
-                    bar.isSpawned = false;
+                    // Only perform the full destruction/reset if the song is playing (implying a scrub backward while playing),
+                    // or if time is near zero (t < 0.1f), which signals a start from the beginning.
+                    if (audioSource.isPlaying || t < 0.1f)
+                    {
+                        if (bar.markerObject != null) Destroy(bar.markerObject);
+                        if (bar.labelObject != null) Destroy(bar.labelObject);
+                        if (bar.perpendicularObject != null) Destroy(bar.perpendicularObject);
+                        bar.isSpawned = false;
+                    } 
                 }
+
 
                 // Spawning Logic
                 if (!bar.isSpawned && t >= startTime && t < startTime + totalTravelTime)
@@ -325,6 +373,72 @@ public class NoteHighway : MonoBehaviour
         }
         // --- End of NEW Bar Marker Logic ---
 
+        // --- NEW Beat Marker Spawning and Movement Logic ---
+        if (showBeatLines && beatMarkers != null)
+        {
+            foreach (var beat in beatMarkers)
+            {
+                float adjustedBeatTime = beat.time / (currentSongSpeedPercentage / 100f);
+                float startTime = adjustedBeatTime - adjustedNoteTravelTime - offsetSeconds;
+
+                // Rewind/Reset Logic
+                if (t < startTime && beat.isSpawned)
+                {
+                    // Only perform the full destruction/reset if the song is playing (implying a scrub backward while playing),
+                    // or if time is near zero (t < 0.1f), which signals a start from the beginning.
+                    if (audioSource.isPlaying || t < 0.1f)
+                    {
+                        if (beat.markerObject != null) Destroy(beat.markerObject);
+                        beat.isSpawned = false;
+                    }
+                }
+
+                // Spawning Logic
+                if (!beat.isSpawned && t >= startTime && t < startTime + totalTravelTime)
+                {
+                    // Calculate positions
+                    float lineCenterY = beatLineYPosition;
+                    
+                    // 1. Create the visual horizontal line (X-axis)
+                    GameObject markerLine = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    markerLine.name = $"BeatMarkerLine_{beat.time:F2}";
+                    markerLine.transform.SetParent(transform);
+                    markerLine.transform.position = new Vector3(barLineXCenterOffset + beatLineXOffset, lineCenterY, spawnZ);
+                    markerLine.transform.localScale = new Vector3(fretboardBarLineTotalWidth, beatLineThickness, 1f);
+                    
+                    Renderer renderer = markerLine.GetComponent<Renderer>();
+                    // Use beatLineMaterial if set, otherwise fall back to barMarkerMaterial
+                    if (renderer != null) renderer.material = beatLineMaterial != null ? beatLineMaterial : barMarkerMaterial;
+                    Collider collider = markerLine.GetComponent<Collider>();
+                    if (collider != null) collider.enabled = false;
+                    
+                    beat.markerObject = markerLine;
+                    beat.isSpawned = true;
+                }
+
+                // Movement and Despawning Logic
+                if (beat.isSpawned)
+                {
+                    float timeSinceSpawn = t - startTime;
+                    float progress = Mathf.Clamp01(timeSinceSpawn / totalTravelTime);
+                    float zPos = Mathf.Lerp(spawnZ, effectiveDespawnZ, progress);
+
+                    if (beat.markerObject != null) beat.markerObject.transform.position = new Vector3(beat.markerObject.transform.position.x, beat.markerObject.transform.position.y, zPos);
+
+                    if (timeSinceSpawn >= totalTravelTime)
+                    {
+                        // Only despawn if the song is actually playing
+                        if (audioSource.isPlaying)
+                        {
+                            if (beat.markerObject != null) Destroy(beat.markerObject);
+                            beat.isSpawned = false;
+                        }
+                    }
+                }
+            }
+        }
+        // --- End of NEW Beat Marker Logic ---
+
         if (notes == null) return; // Exit if no notes are loaded
 
         foreach (var note in notes) {
@@ -337,19 +451,24 @@ public class NoteHighway : MonoBehaviour
             // REWIND/RESET LOGIC:
             if (t < startTime)
             {
-                if (note.noteObject != null)
+                // Only perform the full destruction/reset if the song is playing (implying a scrub backward while playing),
+                // or if time is near zero (t < 0.1f), which signals a start from the beginning.
+                if (audioSource.isPlaying || t < 0.1f)
                 {
-                    Destroy(note.noteObject);
-                    note.noteObject = null;
+                    if (note.noteObject != null)
+                    {
+                        Destroy(note.noteObject);
+                        note.noteObject = null;
+                    }
+                    if (note.fretLabelObject != null)
+                    {
+                        Destroy(note.fretLabelObject);
+                        note.fretLabelObject = null;
+                    }
+                    note.isSpawned = false;
+                    note.hitMarkerSpawned = false;
+                    note.previousZPos = -1f; // Reset previous position
                 }
-                if (note.fretLabelObject != null)
-                {
-                    Destroy(note.fretLabelObject);
-                    note.fretLabelObject = null;
-                }
-                note.isSpawned = false;
-                note.hitMarkerSpawned = false;
-                note.previousZPos = -1f; // Reset previous position
             }
 
             // 1. Spawning Logic:
@@ -439,8 +558,18 @@ public class NoteHighway : MonoBehaviour
 
                 if (note.previousZPos > hitZ && zPos <= hitZ && !note.hitMarkerSpawned)
                 {
+                    float hitMarkerX;
+                    if (note.fretNumber == 0)
+                    {
+                        hitMarkerX = fretOffset + zeroFretNoteWidth / 2f + zeroFretNoteXOffset;
+                    }
+                    else
+                    {
+                        hitMarkerX = GetFretX(note.fretNumber);
+                    }
+
                     Vector3 hitPosition = new Vector3(
-                        note.noteObject.transform.position.x,
+                        hitMarkerX,
                         GetStringY(note.stringNumber),
                         hitZ
                     );
@@ -508,7 +637,8 @@ public class NoteHighway : MonoBehaviour
                 childName.StartsWith("BarMarkerLine_") || 
                 childName.StartsWith("LeftBarMarkerLine_") || 
                 childName.StartsWith("BarLabel_") || 
-                childName.StartsWith("HitMarker_"))
+                childName.StartsWith("HitMarker_") ||
+                childName.StartsWith("BeatMarkerLine_"))
             {
                 GameObject.Destroy(child.gameObject);
             }
@@ -532,6 +662,12 @@ public class NoteHighway : MonoBehaviour
         if (barMarkers != null)
         {
             barMarkers.Clear(); // Clear the list
+        }
+
+        // Reset beat markers data
+        if (beatMarkers != null)
+        {
+            beatMarkers.Clear(); // Clear the list
         }
     }
 

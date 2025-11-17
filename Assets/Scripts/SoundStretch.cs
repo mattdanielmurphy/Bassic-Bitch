@@ -5,7 +5,7 @@ using System.IO;
 
 public static class SoundStretch
 {
-    public static string Process(string inputPath, float tempo)
+    public static string Process(string inputPath, string outputPath, float tempo)
     {
         string toolDir = Path.Combine(Application.streamingAssetsPath, "tools");
         string cliPath = "";
@@ -45,8 +45,6 @@ public static class SoundStretch
                 return null;
             }
         }
-
-        string outputPath = Path.Combine(Path.GetDirectoryName(inputPath), Path.GetFileNameWithoutExtension(inputPath) + "_stretched.wav");
 
         Process process = new Process();
         process.StartInfo.FileName = cliPath;
