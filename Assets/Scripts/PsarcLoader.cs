@@ -1,10 +1,10 @@
+
 using UnityEngine;
 using System.IO;
 using System.Collections;
 using System.Linq;
 using System.Diagnostics;
 using System.Collections.Generic;
-using System.Threading.Tasks; // Added for asynchronous SoundStretch
 using Rocksmith2014PsarcLib.Psarc;
 using UnityEngine.Networking;
 using SFB; // Assuming the StandaloneFileBrowser is in the SFB namespace
@@ -22,16 +22,77 @@ public class PsarcLoader : MonoBehaviour
     private string _originalAudioPath = ""; // Stores the path to the original, unstretched audio file
     private ArrangementData _arrangementData; // Stores the parsed arrangement data (notes and bar times)
     private string _currentPsarcFilePath = ""; // Stores the path to the currently loaded PSARC file
-    private string _currentSongCacheDir = ""; // Stores the cache directory of the currently loaded PSARC file
+    
+    private AudioStreamProvider _audioStreamProvider;
+    
+    private const int STREAM_BUFFER_SIZE = 4096;
 
     public ArrangementData ArrangementData => _arrangementData;
     public bool IsReloading { get; private set; } = false;
+    public bool IsPlaying { get; private set; } = false;
+    public float SongDuration { get; private set; } = 0f;
+    private float _streamStartTime = 0f;
+    private float _playbackTime = 0f;
+
+    public float PlaybackTime
+    {
+        get { return _playbackTime; }
+    }
+
+    void Update()
+    {
+        if (_audioStreamProvider != null)
+        {
+            // Check if we are streaming from soundstretch
+            if (_audioStreamProvider.IsStreaming())
+            {
+                _playbackTime = _streamStartTime + _audioStreamProvider.StreamedTime;
+            }
+            else // We are playing a normal speed song from a pre-loaded buffer
+            {
+                _playbackTime = audioSource.time;
+            }
+        }
+        else
+        {
+            _playbackTime = audioSource.time;
+        }
+    }
 
     [System.Serializable]
     private class SongCacheInfo
     {
         public string PsarcFilePath;
         public string SongName;
+    }
+
+    // Function to read WAV file header and get duration
+    private float GetWavDuration(string filePath)
+    {
+        try
+        {
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            {
+                byte[] buffer = new byte[44];
+                fileStream.Read(buffer, 0, 44);
+
+                int sampleRate = System.BitConverter.ToInt32(buffer, 24);
+                int byteRate = System.BitConverter.ToInt32(buffer, 28);
+                int blockAlign = System.BitConverter.ToInt16(buffer, 32);
+                int bitsPerSample = System.BitConverter.ToInt16(buffer, 34);
+                int dataSize = System.BitConverter.ToInt32(buffer, 40);
+
+                if (byteRate > 0)
+                {
+                    return (float)dataSize / byteRate;
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            UnityEngine.Debug.LogError($"Failed to read WAV header for duration: {e.Message}");
+        }
+        return 0f;
     }
 
     /// <summary>
@@ -143,7 +204,7 @@ public class PsarcLoader : MonoBehaviour
     /// <param name="data">The arrangement data containing the speed to save.</param>
     public void SaveSongSettings(ArrangementData data)
     {
-        if (data == null || string.IsNullOrEmpty(_currentPsarcFilePath)) return;
+        if (data == null || _arrangementData == null || string.IsNullOrEmpty(_currentPsarcFilePath)) return;
 
         string settingsPath = GetSettingsFilePath(_currentPsarcFilePath);
         
@@ -162,242 +223,134 @@ public class PsarcLoader : MonoBehaviour
 
     public void SetSongSpeed(float newPercentage, float oldPercentage)
     {
+        _audioStreamProvider.Stop();
+        audioSource.Stop();
+        
         currentSongSpeedPercentage = newPercentage;
         float tempoChange = newPercentage - 100f; // Calculate the tempo change for soundstretch
-        StartCoroutine(ChangeTempoAndReload(tempoChange, oldPercentage));
+
+        // We need to get the current playback time before we stop everything
+        float currentTime = _playbackTime;
+
+        if (Mathf.Abs(tempoChange) > 0.01f)
+        {
+            _streamStartTime = currentTime;
+            _audioStreamProvider.PlayStream(_originalAudioPath, tempoChange, currentTime);
+        }
+        else
+        {
+            _audioStreamProvider.SetStreamer(null);
+            // We need to reload the original audio and seek to the correct time
+            StartCoroutine(LoadAudioAndNotes(_originalAudioPath, null, currentTime));
+        }
     }
 
     public void JumpToTime(float time)
     {
-        if (audioSource?.clip == null) return;
-
-        // Clamp time to clip length
-        float clampedTime = Mathf.Clamp(time, 0f, audioSource.clip.length);
-        audioSource.time = clampedTime;
-
-        // If the audio is paused, ensure the NoteHighway updates its position immediately
-        if (!audioSource.isPlaying && noteHighway != null)
-        {
-            noteHighway.UpdateHighwayPosition();
-        }
-    }
-
-    IEnumerator ChangeTempoAndReload(float tempoChange, float oldPercentage)
-    {
-        UnityEngine.Debug.Log($"ChangeTempoAndReload called with tempoChange: {tempoChange}");
+        if (audioSource == null) return;
         
-        string originalWavPath;
-        if (!EnsureOriginalAudioIsCached(_currentPsarcFilePath, out originalWavPath) || Path.GetExtension(originalWavPath).ToLower() != ".wav")
-        {
-            UnityEngine.Debug.LogWarning("Original audio file is not a WAV or could not be loaded/recreated. Cannot change tempo.");
-            yield break;
-        }
+        // Clamp the time to the valid range
+        time = Mathf.Clamp(time, 0f, SongDuration);
+        _streamStartTime = time;
+        _playbackTime = time;
+
+        bool wasPlaying = IsPlaying;
         
-        // Update the original audio path field in case it was recreated
-        _originalAudioPath = originalWavPath;
+        // Always stop the AudioSource to silence the output during the transition
+        audioSource.Stop();
+        
+        // We do NOT want to kill the SoundStretch process if we are just seeking and keeping the same tempo.
+        float tempoChange = currentSongSpeedPercentage - 100f;
+        bool isStreaming = Mathf.Abs(tempoChange) > 0.01f;
 
-        IsReloading = true; // Signal that a reload is starting
-
-        // 1. Show loading text immediately and yield a frame to ensure UI update
-        main.SetLoadingText(true);
-        yield return null; // Wait one frame for the UI to update
-
-        bool wasPlaying = false;
-        float currentTime = 0f;
-        float newTime = 0f;
-
-        if (audioSource != null)
+        if (_audioStreamProvider.IsStreaming() && isStreaming)
         {
-            wasPlaying = audioSource.isPlaying;
-            currentTime = audioSource.time;
-            audioSource.Pause(); // Use Pause() instead of Stop() to preserve the current time
-            UnityEngine.Debug.Log($"Audio was playing: {wasPlaying}, current time: {currentTime}");
-
-            // Calculate the new time to maintain musical position: T_new = T_old * (S_old / S_new)
-            float oldSpeedMultiplier = oldPercentage / 100f;
-            float newSpeedMultiplier = currentSongSpeedPercentage / 100f;
-            
-            // Only adjust time if speed actually changed
-            if (Mathf.Abs(oldSpeedMultiplier - newSpeedMultiplier) > 0.001f)
-            {
-                newTime = currentTime * (oldSpeedMultiplier / newSpeedMultiplier);
-                UnityEngine.Debug.Log($"Adjusting time: {currentTime:F2}s * ({oldSpeedMultiplier:F2} / {newSpeedMultiplier:F2}) = {newTime:F2}s");
-            }
-            else
-            {
-                newTime = currentTime;
-            }
-
-            // Clamp to current clip length as a failsafe before reload
-            if (audioSource.clip != null)
-            {
-                // The new clip length will be oldClipLength * (oldSpeedMultiplier / newSpeedMultiplier)
-                float maxNewTime = audioSource.clip.length * (oldSpeedMultiplier / newSpeedMultiplier);
-                newTime = Mathf.Clamp(newTime, 0f, maxNewTime);
-            }
+            // Case 1: Seeking within an already-active stream (most common seek scenario).
+            // This is the efficient fix for the unreliable seeking.
+            _audioStreamProvider.RestartStreamingAtTime(time);
+        }
+        else if (isStreaming)
+        {
+            // Case 2: Starting a stream (transition from 100% speed to adjusted speed).
+            _audioStreamProvider.PlayStream(_originalAudioPath, tempoChange, time);
         }
         else
         {
-            newTime = 0f;
+            // Case 3: 100% speed (transition from adjusted speed to 100%, or seek within 100% speed).
+            // We must kill any existing stream and load the original clip.
+            _audioStreamProvider.StopStreamerOnly();
+            _audioStreamProvider.SetStreamer(null);
+            _audioStreamProvider.Reset();
+            StartCoroutine(LoadAudioAndNotes(_originalAudioPath, null, time));
         }
 
-        UnityEngine.Debug.Log($"PsarcLoader.currentSongSpeedPercentage: {currentSongSpeedPercentage}");
-
-        string audioToLoadPath = _originalAudioPath;
-        string stretchedAudioPath = null;
-
-        // Only run SoundStretch if there is an actual tempo change
-        if (Mathf.Abs(tempoChange) > 0.01f) // Use a small epsilon for float comparison
-        {
-            // Determine the cache path for the stretched audio
-            string cacheDir = GetSongCacheDirectory(_currentPsarcFilePath);
-            // Filename: audio_[speed].wav, e.g., audio_70.wav
-            string stretchedCachePath = Path.Combine(cacheDir, $"audio_{currentSongSpeedPercentage:F0}.wav");
-
-            if (File.Exists(stretchedCachePath))
-            {
-                UnityEngine.Debug.Log($"Found cached stretched audio for {currentSongSpeedPercentage:F0}% speed: {stretchedCachePath}");
-                audioToLoadPath = stretchedCachePath;
-            }
-            else
-            {
-                UnityEngine.Debug.Log("Starting SoundStretch asynchronously...");
-                
-                // Run SoundStretch asynchronously
-                var stretchTask = Task.Run(() => 
-                {
-                    return SoundStretch.Process(_originalAudioPath, stretchedCachePath, tempoChange);
-                });
-
-                // Wait for the task to complete without blocking the main thread
-                yield return new WaitUntil(() => stretchTask.IsCompleted);
-
-                if (stretchTask.IsFaulted)
-                {
-                    UnityEngine.Debug.LogError($"SoundStretch task failed: {stretchTask.Exception}");
-                }
-                else
-                {
-                    stretchedAudioPath = stretchTask.Result;
-                }
-
-                if (stretchedAudioPath != null)
-                {
-                    UnityEngine.Debug.Log($"SoundStretch returned stretched audio path: {stretchedAudioPath}");
-                    audioToLoadPath = stretchedAudioPath;
-                }
-                else
-                {
-                    UnityEngine.Debug.LogError("SoundStretch failed, falling back to original audio.");
-                    // audioToLoadPath remains _originalAudioPath
-                }
-            }
-        }
-        else
-        {
-            UnityEngine.Debug.Log("Tempo change is 0%. Skipping SoundStretch and loading original audio.");
-            // audioToLoadPath remains _originalAudioPath
-        }
-
-        CleanSongCache(audioToLoadPath);
-
-        // Reload audio
-        yield return StartCoroutine(ReloadAudio(audioToLoadPath, newTime, wasPlaying));
+        // The IsPlaying flag is a desired state, not the actual state of audioSource.
+        // We rely on the coroutines (PlayStream or LoadAudioAndNotes) to start playing the audio if needed.
+        IsPlaying = wasPlaying;
         
-        // 2. Hide loading text after reload is complete
-        main.SetLoadingText(false);
-        IsReloading = false; // Signal that the reload is complete
-    }
-
-    IEnumerator ReloadAudio(string audioPath, float startTime, bool wasPlaying)
-    {
-        UnityEngine.Debug.Log($"ReloadAudio: Loading audio from: {audioPath}");
-        UnityEngine.Debug.Log($"ReloadAudio: Start time: {startTime}, Was playing: {wasPlaying}");
-
-        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(new System.Uri(audioPath).AbsoluteUri, AudioType.WAV))
-        {
-            yield return www.SendWebRequest();
-
-            if (www.result == UnityWebRequest.Result.Success)
-            {
-                AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
-                if (clip != null)
-                {
-                    // Update the file's last access time to reflect it was just played
-                    try
-                    {
-                        File.SetLastAccessTimeUtc(audioPath, System.DateTime.UtcNow);
-                        UnityEngine.Debug.Log($"Updated LastAccessTime for: {Path.GetFileName(audioPath)}");
-                    }
-                    catch (System.Exception e)
-                    {
-                        UnityEngine.Debug.LogWarning($"Failed to update LastAccessTime for {audioPath}: {e.Message}");
-                    }
-                    
-                    audioSource.clip = clip;
-                    audioSource.time = startTime;
-                    // Unity workaround: always Play so audioSource.time is valid, then immediate Pause if not supposed to play
-                    audioSource.Play();
-                    if (!wasPlaying)
-                        audioSource.Pause();
-                    UnityEngine.Debug.Log($"ReloadAudio: Successfully reloaded audio. Clip length: {clip.length}");
-                    
-                    // Wait a frame to ensure audioSource.time is fully propagated by Unity
-                    yield return null;
-                    
-                    // Verify that the time was properly restored (or is at least not 0 if we're not at the start)
-                    // This ensures NoteHighway won't see time=0 when it shouldn't
-                    if (audioSource.time == 0f && startTime > 0.1f)
-                    {
-                        // Time didn't restore properly, try setting it again
-                        audioSource.time = startTime;
-                        yield return null; // Wait another frame
-                    }
-                }
-                else
-                {
-                    UnityEngine.Debug.LogError("ReloadAudio: Failed to reload audio clip (GetContent returned null).");
-                }
-            }
-            else
-            {
-                UnityEngine.Debug.LogError($"ReloadAudio: Error loading stretched audio: {www.error}");
-            }
-        }
-        
+        // Ensure the NoteHighway updates its position immediately
         if (noteHighway != null)
         {
             noteHighway.UpdateHighwayPosition();
         }
-
-        IsReloading = false; // Signal that the reload is complete
     }
-
+    
     public void TogglePlayback()
     {
         if (audioSource == null) return;
-        if (audioSource.isPlaying)
+
+        IsPlaying = !IsPlaying;
+
+        if (IsPlaying)
         {
-            audioSource.Pause();
-            // UnityEngine.Debug.Log("Audio Paused");
+            // RESUME
+            if (_audioStreamProvider.IsStreaming())
+            {
+                // Restart the stream from the paused time. JumpToTime handles playing the audio source and sets the flag.
+                JumpToTime(_playbackTime);
+            }
+            else
+            {
+                // 100% speed or pre-loaded, just unpause and set the flag.
+                _audioStreamProvider.Unpause();
+            }
         }
         else
         {
-            audioSource.Play();
-            // UnityEngine.Debug.Log("Audio Played");
+            // PAUSE
+            _audioStreamProvider.Pause();
+
+            if (_audioStreamProvider.IsStreaming())
+            {
+                // CRITICAL: Stop the underlying SoundStretch process to save CPU/buffer on pause.
+                _audioStreamProvider.StopStreamerOnly();
+            }
         }
     }
 
     void Start()
     {
-        noteHighway = FindObjectOfType<NoteHighway>();
+        noteHighway = FindFirstObjectByType<NoteHighway>();
         if (main == null)
         {
-            main = FindObjectOfType<Main>();
+            main = FindFirstObjectByType<Main>();
         }
-        audioSource = gameObject.AddComponent<AudioSource>();
+        // Get the existing AudioSource, or add one if it doesn't exist.
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null)
+        {
+            audioSource = gameObject.AddComponent<AudioSource>();
+        }
         audioSource.mute = startMuted;
+        
+        _audioStreamProvider = gameObject.AddComponent<AudioStreamProvider>();
+        // The audio clip is now managed by the AudioStreamProvider, so we don't create a default one here.
         OpenPsarcFileBrowser();
+    }
+
+    void OnDestroy()
+    {
+        _audioStreamProvider.Stop();
     }
 
     public void NewSong()
@@ -406,6 +359,9 @@ public class PsarcLoader : MonoBehaviour
         {
             audioSource.Stop();
         }
+        
+        _audioStreamProvider.Stop();
+
         OpenPsarcFileBrowser();
     }
 
@@ -465,7 +421,7 @@ public class PsarcLoader : MonoBehaviour
         {
             UnityEngine.Debug.Log("Found cached files. Loading from cache: " + cachedWavPath);
             _originalAudioPath = cachedWavPath;
-            StartCoroutine(LoadAudioAndNotes(cachedWavPath, cachedXmlPath));
+            StartCoroutine(LoadAudioAndNotes(cachedWavPath, cachedXmlPath, 0f));
             return;
         }
 
@@ -509,8 +465,8 @@ public class PsarcLoader : MonoBehaviour
                         CleanSongCache(cachedWavPath); // Clean up the cache after a new song has been added, protecting the newly cached original audio.
                     }
                     
-                    StartCoroutine(LoadAudioAndNotes(fileToLoadPath, arrangementTempPath));
-                }
+                    StartCoroutine(LoadAudioAndNotes(fileToLoadPath, arrangementTempPath, 0f));
+                } 
                 else {
                     UnityEngine.Debug.LogError("Bass arrangement XML not found in PSARC!");
                     return;
@@ -569,12 +525,12 @@ public class PsarcLoader : MonoBehaviour
 
                     string extension = Path.GetExtension(tempAudioPath).ToLower();
 
-                    if (extension == ".wem")
+                    if (extension == ".wem" || extension == ".ogg")
                     {
                         string tempWavPath = Path.ChangeExtension(tempAudioPath, ".wav");
                         
                         // Convert WEM to WAV
-                        if (ConvertWemToWav(tempAudioPath, tempWavPath))
+                        if (ConvertAudioToWav(tempAudioPath, tempWavPath))
                         {
                             // Save the converted WAV to the persistent cache
                             File.Copy(tempWavPath, cachedWavPath, true);
@@ -583,17 +539,15 @@ public class PsarcLoader : MonoBehaviour
                         }
                         else
                         {
-                            UnityEngine.Debug.LogError("WEM conversion failed. Cannot load audio.");
+                            UnityEngine.Debug.LogError("Audio conversion failed. Cannot load audio.");
                             return false;
                         }
                     }
-                    else // OGG or other supported format
+                    else // Other unsupported format
                     {
-                        // OGG is not WAV, and SoundStretch requires WAV. This path is only for a song that can't be stretched.
-                        // We will not cache it as WAV, and we will not return true if speed change is needed later.
-                        UnityEngine.Debug.LogWarning("OGG audio found. Not caching audio. Speed change feature may not work as it requires WAV.");
-                        cachedWavPath = tempAudioPath; // Temporarily assign OGG path
-                        return false; // Return false because we couldn't ensure a WAV cache
+                        // This path is for any format that we can't convert.
+                        UnityEngine.Debug.LogError($"Unsupported audio format found: {extension}. Cannot process this song.");
+                        return false; 
                     }
                 }
                 else
@@ -610,7 +564,7 @@ public class PsarcLoader : MonoBehaviour
         }
     }
 
-    private bool ConvertWemToWav(string wemFilePath, string wavFilePath)
+    private bool ConvertAudioToWav(string inputPath, string outputPath)
     {
         string toolDir = Path.Combine(Application.streamingAssetsPath, "tools");
         string cliPath = "";
@@ -652,7 +606,7 @@ public class PsarcLoader : MonoBehaviour
         
         Process process = new Process();
         process.StartInfo.FileName = cliPath;
-        process.StartInfo.Arguments = $"-o \"{wavFilePath}\" \"{wemFilePath}\"";
+        process.StartInfo.Arguments = $"-o \"{outputPath}\" \"{inputPath}\"" ;
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
@@ -664,17 +618,17 @@ public class PsarcLoader : MonoBehaviour
 
             if (process.ExitCode == 0)
             {
-                FileInfo wavFileInfo = new FileInfo(wavFilePath);
+                FileInfo wavFileInfo = new FileInfo(outputPath);
                 if (!wavFileInfo.Exists || wavFileInfo.Length == 0)
                 {
-                    UnityEngine.Debug.LogError($"WEM conversion succeeded (Exit Code 0) but output WAV file is missing or empty: {wavFilePath}");
+                    UnityEngine.Debug.LogError($"Audio conversion succeeded (Exit Code 0) but output WAV file is missing or empty: {outputPath}");
                     return false;
                 }
                 return true;
             }
             else
             {
-                UnityEngine.Debug.LogError($"WEM conversion failed with exit code {process.ExitCode}.\nSTDERR: {process.StandardError.ReadToEnd()}");
+                UnityEngine.Debug.LogError($"Audio conversion failed with exit code {process.ExitCode}.\nSTDERR: {process.StandardError.ReadToEnd()}");
                 return false;
             }
         }
@@ -684,112 +638,112 @@ public class PsarcLoader : MonoBehaviour
             return false;
         }
     }
-
-    IEnumerator LoadAudioAndNotes(string audioFilePath, string arrangementFilePath)
+    
+    IEnumerator LoadAudioAndNotes(string audioFilePath, string arrangementFilePath, float startTime)
     {
-        // First, parse the arrangement to determine the required song speed
-        _arrangementData = ArrangementParser.ParseArrangement(arrangementFilePath);
+        // Set the song duration first, as the UI depends on it.
+        SongDuration = GetWavDuration(audioFilePath);
+        _streamStartTime = startTime;
+        _playbackTime = startTime;
+
+        // if arrangementFilePath is not null, then we are loading a new song
+        if (arrangementFilePath != null)
+        {
+            // First, parse the arrangement to determine the required song speed
+            _arrangementData = ArrangementParser.ParseArrangement(arrangementFilePath);
         
-        // Load persistent settings to get the last played speed
-        SongSettings settings = LoadSongSettings(_currentPsarcFilePath);
-        _arrangementData.LastPlayedSpeed = settings.LastPlayedSpeed;
-        float speedToApply = _arrangementData.LastPlayedSpeed;
-        currentSongSpeedPercentage = speedToApply; // Update current speed tracker
+            // Load persistent settings to get the last played speed
+            SongSettings settings = LoadSongSettings(_currentPsarcFilePath);
+            _arrangementData.LastPlayedSpeed = settings.LastPlayedSpeed;
+            float speedToApply = _arrangementData.LastPlayedSpeed;
+            currentSongSpeedPercentage = speedToApply; // Update current speed tracker
+        }
 
         // Determine which audio file to load (original or speed-adjusted)
         string audioPathToLoad = audioFilePath; // Default to original
-        float tempoChange = speedToApply - 100f;
+        float tempoChange = currentSongSpeedPercentage - 100f;
 
         if (Mathf.Abs(tempoChange) > 0.01f)
         {
-            string cacheDir = GetSongCacheDirectory(_currentPsarcFilePath);
-            string stretchedCachePath = Path.Combine(cacheDir, $"audio_{speedToApply:F0}.wav");
+            _audioStreamProvider.PlayStream(audioPathToLoad, tempoChange, startTime);
+            IsPlaying = true;
+        }
+        else
+        {
+            _audioStreamProvider.SetStreamer(null); // Ensure no old streamer is active
+            // Now, load the determined audio file
+            string uri = new System.Uri(audioPathToLoad).AbsoluteUri;
+            AudioType audioType = AudioType.WAV; // We only handle WAV for speed changes
 
-            if (File.Exists(stretchedCachePath))
+            using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(uri, audioType))
             {
-                UnityEngine.Debug.Log($"Found cached stretched audio for {speedToApply:F0}% speed: {stretchedCachePath}");
-                audioPathToLoad = stretchedCachePath;
-            }
-            else
-            {
-                UnityEngine.Debug.Log($"No cached audio for {speedToApply:F0}%, creating it now...");
-                string stretchedAudioPath = SoundStretch.Process(audioFilePath, stretchedCachePath, tempoChange);
-                if (stretchedAudioPath != null)
+                yield return www.SendWebRequest();
+
+                if (www.result == UnityWebRequest.Result.Success)
                 {
-                    audioPathToLoad = stretchedAudioPath;
-                    CleanSongCache(stretchedAudioPath); // Clean cache since we added a new file, protecting the newly created stretched audio.
+                    AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
+                    if (clip == null)
+                    {
+                        UnityEngine.Debug.LogError("DownloadHandlerAudioClip.GetContent returned null. Cannot load audio.");
+                        main.SetLoadingText(false);
+                        yield break;
+                    }
+
+                    audioSource.clip = clip;
+                    audioSource.time = startTime;
+                    SongDuration = clip.length;
+                    
+                    // We need to set the full clip data on the provider if we are not streaming
+                    // This is for the OnAudioFilterRead to work correctly
+                    var data = new float[clip.samples * clip.channels];
+                    clip.GetData(data, 0);
+                    _audioStreamProvider.SetFullClipData(data, startTime);
+
+                    // Update the file's last access time to reflect it was just played
+                    try
+                    {
+                        File.SetLastAccessTimeUtc(audioPathToLoad, System.DateTime.UtcNow);
+                        UnityEngine.Debug.Log($"Updated LastAccessTime for: {Path.GetFileName(audioPathToLoad)}");
+                    }
+                    catch (System.Exception e)
+                    {
+                        UnityEngine.Debug.LogWarning($"Failed to update LastAccessTime for {audioPathToLoad}: {e.Message}");
+                    }
+                    
+                    IsPlaying = true;
+                    audioSource.Play();
                 }
                 else
                 {
-                    UnityEngine.Debug.LogError("SoundStretch failed, falling back to original audio.");
-                    audioPathToLoad = audioFilePath; // Explicitly set to original path on failure
+                    UnityEngine.Debug.LogError("Error loading audio: " + www.error);
                 }
             }
         }
 
-        // Now, load the determined audio file
-        string uri = new System.Uri(audioPathToLoad).AbsoluteUri;
-        AudioType audioType = AudioType.WAV; // We only handle WAV for speed changes
-
-        // The logic above ensures audioPathToLoad is either a cached file, a newly created file, or the original file.
-        // If the original file is missing, the load process should have failed earlier.
-        // We can remove the redundant File.Exists check here.
-
-        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(uri, audioType))
+        // Update the UI in Main.cs to reflect the applied speed
+        if (main != null)
         {
-            yield return www.SendWebRequest();
-
-            if (www.result == UnityWebRequest.Result.Success)
-            {
-                AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
-                if (clip == null)
-                {
-                    UnityEngine.Debug.LogError("DownloadHandlerAudioClip.GetContent returned null. Cannot load audio.");
-                    main.SetLoadingText(false);
-                    yield break;
-                }
-                
-                audioSource.clip = clip;
-                
-                // Update the file's last access time to reflect it was just played
-                try
-                {
-                    File.SetLastAccessTimeUtc(audioPathToLoad, System.DateTime.UtcNow);
-                    UnityEngine.Debug.Log($"Updated LastAccessTime for: {Path.GetFileName(audioPathToLoad)}");
-                }
-                catch (System.Exception e)
-                {
-                    UnityEngine.Debug.LogWarning($"Failed to update LastAccessTime for {audioPathToLoad}: {e.Message}");
-                }
-                
-                // Update the UI in Main.cs to reflect the applied speed
-                if (main != null)
-                {
-                    main.UpdateSongSpeedUI(speedToApply);
-                }
-                
-                if (noteHighway != null)
-                {
-                    noteHighway.psarcLoader = this;
-                    noteHighway.LoadArrangementData(_arrangementData);
-                    noteHighway.audioSource = audioSource;
-                    audioSource.Play();
+            main.UpdateSongSpeedUI(currentSongSpeedPercentage);
+        }
                     
-                    // Notify Main script that the song has loaded and started playing
-                    if (main != null)
-                    {
-                        main.SongLoadedAndStarted();
-                    }
-                }
-                else
-                {
-                    UnityEngine.Debug.LogError("NoteHighway not set in Inspector! Cannot start song.");
-                }
-            }
-            else
+        if (noteHighway != null)
+        {
+            noteHighway.psarcLoader = this;
+            if (arrangementFilePath != null)
             {
-                UnityEngine.Debug.LogError("Error loading audio: " + www.error);
+                noteHighway.LoadArrangementData(_arrangementData);
             }
+            noteHighway.audioSource = audioSource;
+                        
+            // Notify Main script that the song has loaded and started playing
+            if (main != null)
+            {
+                main.SongLoadedAndStarted();
+            }
+        }
+        else
+        {
+            UnityEngine.Debug.LogError("NoteHighway not set in Inspector! Cannot start song.");
         }
 
         main.SetLoadingText(false);

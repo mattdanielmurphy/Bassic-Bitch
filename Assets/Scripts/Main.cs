@@ -95,13 +95,6 @@ public class Main : MonoBehaviour
 
     void Update()
     {
-        // Check if playback has stopped naturally (e.g., reached end of song)
-        if (psarcLoader?.audioSource?.clip != null && isPlaying && !psarcLoader.audioSource.isPlaying)
-        {
-            isPlaying = false;
-            UpdatePlayPauseButtonText();
-        }
-
         // Ensure a keyboard is present before checking for input
         if (Keyboard.current == null) return;
 
@@ -159,11 +152,11 @@ public class Main : MonoBehaviour
             _barNavigationTimer = Time.time + _barNavigationRepeatRate;
         }
 
-        if (psarcLoader?.audioSource?.clip != null && psarcLoader.audioSource.isPlaying)
+        if (psarcLoader?.SongDuration > 0 && psarcLoader.IsPlaying)
         {
             // Set flag to prevent OnScrubberValueChanged from firing the reset logic
             isUpdatingScrubberFromCode = true;
-            playbackScrubber.value = psarcLoader.audioSource.time / psarcLoader.audioSource.clip.length;
+            playbackScrubber.value = psarcLoader.PlaybackTime / psarcLoader.SongDuration;
             isUpdatingScrubberFromCode = false;
         }
     }
@@ -222,34 +215,26 @@ public class Main : MonoBehaviour
     /// </summary>
     public void SongLoadedAndStarted()
     {
-        if (psarcLoader?.audioSource != null)
-        {
-            // Reset scrubber to 0 (start of song)
-            isUpdatingScrubberFromCode = true;
-            playbackScrubber.value = 0f;
-            isUpdatingScrubberFromCode = false;
+        if (psarcLoader == null) return;
+        
+        // Reset scrubber to 0 (start of song)
+        isUpdatingScrubberFromCode = true;
+        playbackScrubber.value = 0f;
+        isUpdatingScrubberFromCode = false;
             
-            // Force the state to 'playing' since we just initiated playback
-            isPlaying = true;
-            UpdatePlayPauseButtonText();
-        }
+        // Force the state to 'playing' since we just initiated playback
+        isPlaying = psarcLoader.IsPlaying;
+        UpdatePlayPauseButtonText();
     }
 
     void TogglePlayPause()
     {
-        if (psarcLoader == null || psarcLoader.audioSource == null) return;
-
-        isPlaying = !psarcLoader.audioSource.isPlaying;
-
-        if (isPlaying)
+        if (psarcLoader != null)
         {
-            psarcLoader.audioSource.Play();
+            psarcLoader.TogglePlayback();
+            isPlaying = psarcLoader.IsPlaying;
+            UpdatePlayPauseButtonText();
         }
-        else
-        {
-            psarcLoader.audioSource.Pause();
-        }
-        UpdatePlayPauseButtonText();
     }
 
     void ToggleMute()
@@ -265,11 +250,12 @@ public class Main : MonoBehaviour
         // If the code is updating the scrubber, ignore this event
         if (isUpdatingScrubberFromCode) return;
 
-        if (psarcLoader?.audioSource?.clip == null) return;
+        if (psarcLoader?.SongDuration <= 0) return;
 
-        float targetTime = value * psarcLoader.audioSource.clip.length;
+        float targetTime = value * psarcLoader.SongDuration;
         psarcLoader.JumpToTime(targetTime);
     }
+
 
     void UpdatePlayPauseButtonText()
     {

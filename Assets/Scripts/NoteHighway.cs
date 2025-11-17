@@ -246,7 +246,7 @@ public class NoteHighway : MonoBehaviour
             return;
         }
 
-        float t = audioSource.time;
+        float t = psarcLoader.PlaybackTime;
         
         // Calculate adjusted note travel time based on song speed
         float currentSongSpeedPercentage = psarcLoader.currentSongSpeedPercentage;
